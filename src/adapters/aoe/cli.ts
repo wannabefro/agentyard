@@ -1,4 +1,3 @@
-import { $ } from "bun";
 import type { ZodTypeAny, z } from "zod";
 
 class AoeCliError extends Error {
@@ -64,5 +63,3 @@ async function runVoid(argv: string[]): Promise<void> {
 }
 
 export { runJson, runVoid, AoeCliError };
-// eslint quiet — `$` import will be used once the streaming-capture path lands
-void $;

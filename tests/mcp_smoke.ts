@@ -83,13 +83,29 @@ expect((init.result as { serverInfo: { name: string } }).serverInfo.name === "pe
 await notify("notifications/initialized");
 
 const tools = await send("tools/list", {});
-const toolNames = (tools.result as { tools: { name: string }[] }).tools
-  .map((t) => t.name)
-  .sort();
+const toolList = (tools.result as { tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[] }).tools;
+const toolNames = toolList.map((t) => t.name).sort();
+const expectedTools = [
+  "get_output",
+  "get_session",
+  "list_sessions",
+  "resolve_session",
+  "send_input",
+  "send_then_wait",
+  "wait_idle",
+];
 expect(
-  ["get_output", "get_session", "list_sessions", "resolve_session", "send_input", "wait_idle"]
-    .every((n) => toolNames.includes(n)),
+  expectedTools.every((n) => toolNames.includes(n)),
   `tools/list -> ${toolNames.join(", ")}`,
+);
+
+const sendThenWait = toolList.find((t) => t.name === "send_then_wait");
+const props = sendThenWait?.inputSchema.properties ?? {};
+expect(
+  ["adapter", "id", "text", "changeTimeoutMs", "idleTimeoutMs", "idleWindowMs"].every(
+    (k) => k in props,
+  ),
+  `send_then_wait input schema has expected keys: ${Object.keys(props).join(", ")}`,
 );
 
 const listResp = await send("tools/call", {

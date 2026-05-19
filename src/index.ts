@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { AoeAdapter } from "@/adapters/aoe/index.ts";
+import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
 import { resolve } from "@/resolver/index.ts";
 
@@ -119,6 +120,38 @@ server.registerTool(
   },
   async ({ adapter, id, text }) => {
     const result = await registry.get(adapter).sendInput(id, text);
+    return asJsonText(result);
+  },
+);
+
+server.registerTool(
+  "send_then_wait",
+  {
+    title: "Send input and wait for the agent to settle",
+    description:
+      "Send a message to a session and block until the agent has processed it: " +
+      "(1) snapshot the pane, (2) send the text, (3) wait for the pane to change " +
+      "(proves the agent received it), (4) wait for the pane to stop changing for " +
+      "`idleWindowMs` (proves the agent is done). Returns before/after snapshots and " +
+      "whether each phase succeeded. This is the canonical loop primitive — call it " +
+      "in a loop from a host to drive an agent through multi-turn work.",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+      text: z.string().min(1),
+      changeTimeoutMs: z.number().int().min(500).max(120_000).default(15_000),
+      idleTimeoutMs: z.number().int().min(1000).max(600_000).default(120_000),
+      idleWindowMs: z.number().int().min(500).max(60_000).default(5_000),
+      pollIntervalMs: z.number().int().min(250).max(10_000).default(1000),
+    },
+  },
+  async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs }) => {
+    const result = await sendThenWait(registry.get(adapter), id, text, {
+      changeTimeoutMs,
+      idleTimeoutMs,
+      idleWindowMs,
+      pollIntervalMs,
+    });
     return asJsonText(result);
   },
 );

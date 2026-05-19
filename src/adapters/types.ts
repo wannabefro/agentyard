@@ -18,6 +18,23 @@ export type IdleWaitOptions = {
   pollIntervalMs?: number;
 };
 
+export type SendThenWaitOptions = {
+  changeTimeoutMs: number;
+  idleTimeoutMs: number;
+  idleWindowMs: number;
+  pollIntervalMs?: number;
+};
+
+export type SendThenWaitResult = {
+  ok: boolean;
+  changed: boolean;
+  settled: boolean;
+  before: OutputSnapshot;
+  after: OutputSnapshot;
+  elapsedMs: number;
+  reason?: string;
+};
+
 export type Adapter = {
   readonly name: string;
 
@@ -31,4 +48,6 @@ export type Adapter = {
     settled: boolean;
     lastSnapshot: OutputSnapshot;
   }>;
+
+  sendThenWait?(id: string, text: string, opts: SendThenWaitOptions): Promise<SendThenWaitResult>;
 };
