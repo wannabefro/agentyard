@@ -202,7 +202,26 @@ Things the adapter contract must accommodate:
 3. **"Idle detection"** is not exposed directly. The adapter has to compute it from successive `capture` snapshots (pane unchanged for N seconds, or trailing prompt matches a per-agent regex). This is per-agent because the prompt shape differs (Claude Code, Codex CLI, Gemini CLI all render differently).
 4. **Session creation by the orchestrator** is supported via `aoe add` — useful for "spawn a fender-evals agent" flows, but lower priority than read + send + loop for the first iteration.
 
-## Open questions (remaining)
+## Bug class: `status=idle` is not the same as "ready for input"
+
+Found during live dogfood (2026-05-19) running `send_then_wait` against a freshly-started session:
+
+- `aoe session show <id> --json` reported `status: "idle"` within a couple of seconds of `aoe session start`.
+- `aoe send <id> "..."` succeeded at the subprocess level.
+- The Claude TUI was still rendering its welcome animation. The send did not reach the agent (post-send pane showed `0% ctx | $0.000` — agent processed zero tokens).
+- pepper's `send_then_wait` saw the welcome-animation pixels change, then stabilize, and reported `ok=true changed=true settled=true`. The success was a lie: nothing the agent did caused the change.
+
+Implication for the adapter: **"pane changed after send" is necessary but not sufficient evidence that the agent received the input.** A more honest readiness check is needed before sending — or the adapter should detect "this change looks like TUI startup, not agent output."
+
+Re-run after waiting until the TUI had rendered its prompt (`❯`) worked correctly: `⏺ pong`, `6% ctx | $0.357`, 11.9s wall.
+
+Possible fixes (not yet implemented):
+
+1. **Echo verification.** After `aoe send`, look for the sent text appearing in the pane. Claude Code's TUI echoes user input. Codex CLI does too. If the echo doesn't show within `changeTimeoutMs`, the send didn't take.
+2. **Pre-send prompt-cursor check.** Wait for the agent's prompt cursor (`❯` for Claude Code, similar for others) to be the *last visible line* before sending. This is per-tool and belongs in the adapter.
+3. **Status transition watch.** Wait for `aoe` status to flip `idle → running → idle` rather than just relying on pane stability. Requires polling `aoe session show --json` in parallel with pane snapshots.
+
+(2) is the most reliable but most adapter/tool-specific. (1) is simpler and probably good enough. (3) layers cleanly on top of either.
 
 Resolved by direct probe of `aoe 1.7.0` on this machine: session schema, ID format, status values, fields available per surface, `agent_session_id` presence.
 

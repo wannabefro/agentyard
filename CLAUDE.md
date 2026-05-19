@@ -117,6 +117,14 @@ Tests live in `tests/` (not `src/`) and run directly with `bun run`.
 - Linter/formatter (Biome is the natural pick; not added yet).
 - Multi-adapter mode is supported by the registry but only `aoe` is implemented. Future adapters live in `src/adapters/<name>/`.
 
+## Known bug class: pre-send readiness
+
+`send_then_wait` will report `ok=true settled=true` for a freshly-started agent session whose TUI is still booting — pane rendering during startup looks identical to agent output to the poller. The send arrives at a not-yet-receptive terminal and is lost; pepper reports success.
+
+Mitigations not yet implemented (see [docs/research/agent-of-empires.md](docs/research/agent-of-empires.md) for detail): echo-verification post-send, prompt-cursor pre-send check, or watching `aoe` status transitions `idle → running → idle`. The right fix is adapter-scoped because the readiness signal differs per agent CLI.
+
+For now: don't `send_then_wait` against a session within ~10s of `aoe session start` without first verifying the TUI prompt is up.
+
 ## Related external context
 
 The user's global `~/.claude/CLAUDE.md` and `~/.claude/rules/` already cover general workflow, verification, commit, and delegation rules. This file is for `pepper`-specific guidance only.
