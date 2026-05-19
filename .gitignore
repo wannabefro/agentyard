@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+dist/
+.env
+.env.local
+
+# Local agent / editor settings — not part of the source contract
+.claude/
