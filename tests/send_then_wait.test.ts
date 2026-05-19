@@ -56,22 +56,23 @@ function mockAdapter(opts: {
   return adapter;
 }
 
-describe("sendThenWait composition", () => {
-  test("happy path: pane changes after send, then settles", async () => {
+describe("sendThenWait with echo verification", () => {
+  test("happy path: pane echoes the sent text, then settles", async () => {
+    const sentText = "please summarize the codebase";
     const adapter = mockAdapter({
       paneScript: [
         "before-send",
         "before-send",
-        "agent responding...",
-        "agent responding more...",
-        "agent done.",
-        "agent done.",
-        "agent done.",
-        "agent done.",
-        "agent done.",
+        `❯ ${sentText}`,
+        `❯ ${sentText}\nagent thinking...`,
+        `❯ ${sentText}\nthe codebase is structured as...`,
+        `❯ ${sentText}\nthe codebase is structured as... done.`,
+        `❯ ${sentText}\nthe codebase is structured as... done.`,
+        `❯ ${sentText}\nthe codebase is structured as... done.`,
+        `❯ ${sentText}\nthe codebase is structured as... done.`,
       ],
     });
-    const result = await sendThenWait(adapter, "sess", "hello", {
+    const result = await sendThenWait(adapter, "sess", sentText, {
       changeTimeoutMs: 1000,
       idleTimeoutMs: 2000,
       idleWindowMs: 50,
@@ -80,50 +81,60 @@ describe("sendThenWait composition", () => {
     expect(result.ok).toBe(true);
     expect(result.changed).toBe(true);
     expect(result.settled).toBe(true);
-    expect(result.before.content).toBe("before-send");
-    expect(result.after.content).toBe("agent done.");
+    expect(result.after.content).toContain(sentText);
+    expect(result.after.content).toContain("done.");
     expect(adapter.sendCount).toBe(1);
   });
 
-  test("send failure short-circuits — never polls for change", async () => {
+  test("TUI churn without echo: ok=false (this is the real-world readiness bug)", async () => {
+    // Pane changes (welcome animation, status bar updates) but never contains the sent text.
+    const adapter = mockAdapter({
+      paneScript: [
+        "Welcome to Sam Claude!",
+        "Welcome to Sam Claude!\n[loading...]",
+        "Welcome to Sam Claude!\n[loading...]\n[ready]",
+        "Welcome to Sam Claude!\n[loading...]\n[ready]\n❯ ",
+        "Welcome to Sam Claude!\n[loading...]\n[ready]\n❯ ",
+        "Welcome to Sam Claude!\n[loading...]\n[ready]\n❯ ",
+      ],
+    });
+    const result = await sendThenWait(adapter, "sess", "please run the tests and report back", {
+      changeTimeoutMs: 100,
+      idleTimeoutMs: 200,
+      idleWindowMs: 50,
+      pollIntervalMs: 20,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.changed).toBe(true); // pane DID change — just not in the way we wanted
+    expect(result.settled).toBe(false);
+    expect(result.reason).toContain("did not appear in pane");
+  });
+
+  test("send failure short-circuits — never polls for echo", async () => {
     const adapter = mockAdapter({
       paneScript: ["x"],
       sendOk: false,
       sendFailReason: "session stopped",
     });
-    const result = await sendThenWait(adapter, "sess", "hi", {
+    const result = await sendThenWait(adapter, "sess", "please summarize the codebase", {
       changeTimeoutMs: 500,
       idleTimeoutMs: 500,
       idleWindowMs: 50,
       pollIntervalMs: 10,
     });
     expect(result.ok).toBe(false);
-    expect(result.changed).toBe(false);
-    expect(result.settled).toBe(false);
     expect(result.reason).toContain("send failed");
     expect(result.reason).toContain("session stopped");
   });
 
-  test("no change after send → ok=false with reason", async () => {
-    const adapter = mockAdapter({
-      paneScript: ["unchanged"],
-    });
-    const result = await sendThenWait(adapter, "sess", "hi", {
-      changeTimeoutMs: 100,
-      idleTimeoutMs: 500,
-      idleWindowMs: 50,
-      pollIntervalMs: 20,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.changed).toBe(false);
-    expect(result.reason).toContain("no pane change");
-  });
-
-  test("changed but never settles → ok=true, settled=false", async () => {
+  test("echo seen but agent never settles → ok=true, settled=false", async () => {
+    const sentText = "please summarize the codebase";
     const paneScript: Script = ["before"];
-    for (let i = 0; i < 200; i += 1) paneScript.push(`tick-${i}`);
+    for (let i = 0; i < 200; i += 1) {
+      paneScript.push(`❯ ${sentText}\ntick-${i}`);
+    }
     const adapter = mockAdapter({ paneScript });
-    const result = await sendThenWait(adapter, "sess", "hi", {
+    const result = await sendThenWait(adapter, "sess", sentText, {
       changeTimeoutMs: 500,
       idleTimeoutMs: 200,
       idleWindowMs: 1000,
@@ -133,6 +144,20 @@ describe("sendThenWait composition", () => {
     expect(result.changed).toBe(true);
     expect(result.settled).toBe(false);
     expect(result.reason).toContain("did not settle");
+  });
+
+  test("short text (< 8 chars) falls back to change detection", async () => {
+    const adapter = mockAdapter({
+      paneScript: ["before", "before", "any change at all", "any change at all", "any change at all", "any change at all"],
+    });
+    const result = await sendThenWait(adapter, "sess", "y", {
+      changeTimeoutMs: 500,
+      idleTimeoutMs: 500,
+      idleWindowMs: 50,
+      pollIntervalMs: 10,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
   });
 
   test("adapter sendThenWait override is preferred", async () => {
@@ -153,7 +178,7 @@ describe("sendThenWait composition", () => {
         reason: "from override",
       }),
     };
-    const result = await sendThenWait(adapter, "sess", "hi", {
+    const result = await sendThenWait(adapter, "sess", "anything goes here", {
       changeTimeoutMs: 1,
       idleTimeoutMs: 1,
       idleWindowMs: 1,

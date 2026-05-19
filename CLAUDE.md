@@ -117,13 +117,13 @@ Tests live in `tests/` (not `src/`) and run directly with `bun run`.
 - Linter/formatter (Biome is the natural pick; not added yet).
 - Multi-adapter mode is supported by the registry but only `aoe` is implemented. Future adapters live in `src/adapters/<name>/`.
 
-## Known bug class: pre-send readiness
+## Readiness check: echo verification
 
-`send_then_wait` will report `ok=true settled=true` for a freshly-started agent session whose TUI is still booting — pane rendering during startup looks identical to agent output to the poller. The send arrives at a not-yet-receptive terminal and is lost; pepper reports success.
+`send_then_wait` uses echo verification — after `sendInput`, it waits for the (first 30 chars of, whitespace-normalized) sent text to appear in the pane more times than it appeared pre-send. This distinguishes "agent received and rendered the input" from "TUI is just doing its own boot rendering." Sends to a not-yet-receptive terminal now fail cleanly with `ok=false reason: "sent text did not appear in pane..."` instead of silently looking successful.
 
-Mitigations not yet implemented (see [docs/research/agent-of-empires.md](docs/research/agent-of-empires.md) for detail): echo-verification post-send, prompt-cursor pre-send check, or watching `aoe` status transitions `idle → running → idle`. The right fix is adapter-scoped because the readiness signal differs per agent CLI.
+Short prompts (< 8 chars) fall back to plain change detection and are labeled accordingly in the result reason.
 
-For now: don't `send_then_wait` against a session within ~10s of `aoe session start` without first verifying the TUI prompt is up.
+Other readiness signals (prompt-cursor pre-send check, `aoe` status transitions) remain on the table for agents that don't echo verbatim — see [docs/research/agent-of-empires.md](docs/research/agent-of-empires.md).
 
 ## Related external context
 
