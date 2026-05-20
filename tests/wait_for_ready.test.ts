@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { findRecentPromptCursorLine } from "@/adapters/aoe/index.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import type {
   Adapter,
@@ -87,6 +88,70 @@ describe("waitForReady", () => {
     const result = await adapter.waitForReady!("sess", { timeoutMs: 80, pollIntervalMs: 15 });
     expect(result.ready).toBe(false);
     expect(result.reason).toContain("prompt cursor not detected");
+  });
+
+  // Direct coverage of the real heuristic in src/adapters/aoe/index.ts —
+  // distinct from the mock above which has its own copy. The dogfood pass
+  // on 0.1.4 caught a regression where the previous "lastNonEmptyLine
+  // ends with cursor" check missed real Claude Code TUI panes that render
+  // a status footer below the input.
+  describe("findRecentPromptCursorLine (real heuristic)", () => {
+    test("detects cursor when it is the last non-empty line", () => {
+      const pane = "booting...\nsome output\n❯";
+      expect(findRecentPromptCursorLine(pane)).toBe("❯");
+    });
+
+    test("detects cursor when followed by a multi-line status footer", () => {
+      // This is the exact shape current Claude Code TUI renders:
+      // a divider, the cursor line, another divider, then footer text.
+      // The old heuristic missed this because the last non-empty line is
+      // the footer, not the cursor.
+      const pane = [
+        "Welcome back Sam!",
+        "────────────────────────────────────────",
+        "❯ ",
+        "────────────────────────────────────────",
+        "   [Opus 4.7 (1M context)] ay-dogfood-target | 0% ctx | $0.000",
+        "  ← for agents",
+        "                              1 MCP server failed · /mcp",
+      ].join("\n");
+      const result = findRecentPromptCursorLine(pane);
+      expect(result).toBe("❯");
+    });
+
+    test("detects cursor in a menu (cursor + selection text)", () => {
+      // Trust prompt on first agent boot. The cursor is on the "Yes"
+      // option line, not at the trailing position.
+      const pane = [
+        "Quick safety check: Is this a project you trust?",
+        "",
+        "❯ 1. Yes, I trust this folder",
+        "  2. No, exit",
+        "",
+        "Enter to confirm · Esc to cancel",
+      ].join("\n");
+      const result = findRecentPromptCursorLine(pane);
+      expect(result).toBe("❯ 1. Yes, I trust this folder");
+    });
+
+    test("detects the Codex CLI single-angle cursor", () => {
+      const pane = "loading...\n› hello";
+      expect(findRecentPromptCursorLine(pane)).toBe("› hello");
+    });
+
+    test("returns null when no cursor is in the recent window", () => {
+      const pane = ["initializing...", "still booting...", "more output", "no cursor here"].join(
+        "\n",
+      );
+      expect(findRecentPromptCursorLine(pane)).toBeNull();
+    });
+
+    test("ignores a cursor glyph embedded mid-word (false positive guard)", () => {
+      // A cursor glyph might appear inside command output or pasted text —
+      // we should not treat that as a ready prompt.
+      const pane = "some output saying foo❯bar in the middle\nmore output";
+      expect(findRecentPromptCursorLine(pane)).toBeNull();
+    });
   });
 
   test("sendThenWait short-circuits on readiness failure and never calls sendInput", async () => {

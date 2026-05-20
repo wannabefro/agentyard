@@ -31,6 +31,42 @@ function lastNonEmptyLine(content: string): string {
   return lines[lines.length - 1] ?? "";
 }
 
+// How many of the most recent non-empty lines to scan for a prompt cursor.
+// Recent Claude Code versions render a multi-line status footer below the
+// input cursor (model name, ctx %, MCP status, hints), so the cursor is no
+// longer the absolute trailing position. 20 lines comfortably spans those
+// footers and any selector menus while staying tight enough to not match
+// cursors embedded in scrollback content.
+const PROMPT_SCAN_WINDOW = 20;
+
+// Returns the most recent line that looks like a prompt-cursor line
+// (cursor at line-start, optionally followed by whitespace or menu/text),
+// or null if no such line is in the recent pane window. This replaces the
+// older "lastNonEmptyLine ends with cursor" heuristic, which broke when
+// agents started rendering footers below the input.
+//
+// Exported only for direct test coverage — production callers should use
+// AoeAdapter.waitForReady.
+export function findRecentPromptCursorLine(content: string): string | null {
+  const lines = content
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  const tail = lines.slice(-PROMPT_SCAN_WINDOW);
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const line = tail[i]!;
+    const trimmed = line.trimStart();
+    for (const cursor of KNOWN_PROMPT_CURSORS) {
+      // Match "❯" alone or "❯ <anything>". Avoids matching a cursor
+      // glyph embedded mid-word.
+      if (trimmed === cursor || trimmed.startsWith(cursor + " ")) {
+        return line;
+      }
+    }
+  }
+  return null;
+}
+
 function parseDate(value: string | undefined | null): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -237,13 +273,15 @@ export class AoeAdapter implements Adapter {
 
     while (Date.now() < deadline) {
       const snap = await this.getOutput(id, 30);
-      const lastLine = lastNonEmptyLine(snap.content);
-      if (KNOWN_PROMPT_CURSORS.some((c) => lastLine.endsWith(c))) {
-        return { ready: true, lastLine };
+      const cursorLine = findRecentPromptCursorLine(snap.content);
+      if (cursorLine !== null) {
+        return { ready: true, lastLine: cursorLine };
       }
       await Bun.sleep(pollMs);
     }
 
+    // For the timeout reason we surface the actual trailing line so the
+    // caller can see what the agent was rendering instead of a prompt.
     const snap = await this.getOutput(id, 30);
     const lastLine = lastNonEmptyLine(snap.content);
     return {
