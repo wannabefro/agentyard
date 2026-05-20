@@ -66,9 +66,13 @@ export type Adapter = {
   getSession(id: string): Promise<Session | null>;
 
   getOutput(id: string, lines?: number): Promise<OutputSnapshot>;
-  sendInput(id: string, text: string): Promise<SendResult>;
 
-  waitIdle(id: string, opts: IdleWaitOptions): Promise<{
+  // Write + loop primitives: optional. Read-only adapters (e.g. transcript readers)
+  // omit these. Hosts must check before calling; MCP tool routes return a
+  // descriptive not-implemented response when missing.
+  sendInput?(id: string, text: string): Promise<SendResult>;
+
+  waitIdle?(id: string, opts: IdleWaitOptions): Promise<{
     settled: boolean;
     lastSnapshot: OutputSnapshot;
   }>;

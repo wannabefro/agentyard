@@ -126,7 +126,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id, text }) => {
-    const result = await registry.get(adapter).sendInput(id, text);
+    const a = registry.get(adapter);
+    if (!a.sendInput) return notImplemented(adapter, "sendInput");
+    const result = await a.sendInput(id, text);
     return asJsonText(result);
   },
 );
@@ -180,7 +182,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id, timeoutMs, idleWindowMs, pollIntervalMs }) => {
-    const result = await registry.get(adapter).waitIdle(id, {
+    const a = registry.get(adapter);
+    if (!a.waitIdle) return notImplemented(adapter, "waitIdle");
+    const result = await a.waitIdle(id, {
       timeoutMs,
       idleWindowMs,
       pollIntervalMs,

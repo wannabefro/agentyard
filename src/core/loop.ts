@@ -97,6 +97,18 @@ export async function sendThenWait(
   const started = Date.now();
   const before = await adapter.getOutput(id);
 
+  if (!adapter.sendInput || !adapter.waitIdle) {
+    return {
+      ok: false,
+      changed: false,
+      settled: false,
+      before,
+      after: before,
+      elapsedMs: Date.now() - started,
+      reason: `adapter '${adapter.name}' does not support sendThenWait (read-only)`,
+    };
+  }
+
   if (adapter.waitForReady) {
     const readyMs = opts.readyTimeoutMs ?? 30_000;
     const ready = await adapter.waitForReady(id, { timeoutMs: readyMs, pollIntervalMs: pollMs });
