@@ -10,6 +10,28 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+### Added
+
+- `Session.summary` — optional short text snapshot of what each session is
+  working on. Lets the resolver match queries against pane content (aoe) or
+  the most recent user prompt (claude-code), not just title / branch
+  metadata. aoe sessions with codename titles (e.g. `404-mt`, `Tatars`) are
+  now findable by what they're doing.
+  - **aoe**: populated during `listSessions` via parallel
+    `aoe session capture --strip-ansi -n 120`, condensed to ≤ 1500 chars.
+    Failures are tolerated — sessions in error state often have no
+    capturable pane.
+  - **claude-code**: populated from `lastPrompt` in the transcript
+    summary (free — already computed).
+- Resolver: `summary` is now a search field. Substring match (weight 3 —
+  equal to title to let summary out-rank partial title hits) and Fuse
+  fuzzy match (weight 1) both contribute. Reasons include
+  `summary contains N% of query tokens`.
+- Resolver: substring matchers now do lightweight stem-aware containment
+  so "tests" finds "test", "failing" finds "fail", etc. Prevents
+  query / pane plural/verb mismatch from missing real hits. Length > 3
+  guard avoids over-matching short tokens.
+
 ## [0.1.3] - 2026-05-20
 
 ### Added

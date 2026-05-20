@@ -19,6 +19,7 @@ function makeSession(id: string, title = id): Session {
     lastActivityAt: null,
     idleSinceAt: null,
     nativeSessionId: null,
+    summary: null,
     raw: null,
   };
 }

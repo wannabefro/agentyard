@@ -16,6 +16,7 @@ function makeSession(overrides: Partial<Session> & { id: string; title: string }
     lastActivityAt: null,
     idleSinceAt: null,
     nativeSessionId: null,
+    summary: null,
     raw: null,
     ...overrides,
   };
@@ -126,5 +127,41 @@ describe("resolve", () => {
     const candidates = resolve("auth bugfix", [other, withBranch]);
     expect(candidates[0]!.session.id).toBe("wb");
     expect(candidates[0]!.reasons.some((r) => r.includes("branch"))).toBe(true);
+  });
+
+  test("summary text outranks a partial title-token match when it covers more of the query", () => {
+    // This is the 404-mt regression: aoe session with a codename title that
+    // covers none of the query, but whose pane content covers all of it.
+    // Without summary matching it would lose to any session whose title
+    // happens to contain one token (e.g. 'go').
+    const codenamed = makeSession({
+      id: "404-mt",
+      title: "404-mt",
+      branch: "404-mt",
+      summary:
+        "ran pants test go/i18n_platform/l10n_service:: fixed failing test fakes for translate v2 committed and pushed",
+    });
+    const partialTitle = makeSession({
+      id: "statsig",
+      title: "Add Statsig feature flag for Go l10n writer",
+      branch: "use_go_write",
+    });
+    const candidates = resolve("failing go tests", [partialTitle, codenamed]);
+    expect(candidates[0]!.session.id).toBe("404-mt");
+    expect(candidates[0]!.reasons.some((r) => r.includes("summary"))).toBe(true);
+  });
+
+  test("summary matching is skipped when the field is null", () => {
+    // Sanity: a session with no summary should not appear via the summary
+    // matcher; only matchers that consult populated fields contribute.
+    const noSummary = makeSession({
+      id: "x",
+      title: "thing",
+      summary: null,
+    });
+    const candidates = resolve("go tests", [noSummary]);
+    for (const c of candidates) {
+      expect(c.reasons.find((r) => r.includes("summary"))).toBeUndefined();
+    }
   });
 });

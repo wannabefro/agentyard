@@ -61,6 +61,15 @@ export class ClaudeCodeAdapter implements Adapter {
   }
 }
 
+// Mirror of aoe's summary cap so search behavior is consistent across adapters.
+const SUMMARY_MAX_CHARS = 500;
+
+function condenseSummary(s: string): string {
+  const collapsed = s.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= SUMMARY_MAX_CHARS) return collapsed;
+  return collapsed.slice(0, SUMMARY_MAX_CHARS) + "…";
+}
+
 function buildSession(
   t: DiscoveredTranscript,
   summary: TranscriptSummary,
@@ -82,6 +91,14 @@ function buildSession(
     lastActivityAt: last,
     idleSinceAt: null,
     nativeSessionId: summary.sessionId,
+    // lastPrompt captures what the user most recently asked the agent to do —
+    // a strong signal for resolver queries. Falls back to title (often a
+    // descriptive ai-generated phrase) when no prompt was recorded.
+    summary: summary.lastPrompt
+      ? condenseSummary(summary.lastPrompt)
+      : summary.title
+      ? condenseSummary(summary.title)
+      : null,
     raw: summary,
   };
 }

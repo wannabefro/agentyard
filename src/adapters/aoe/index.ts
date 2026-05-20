@@ -40,6 +40,7 @@ function parseDate(value: string | undefined | null): Date | null {
 function entryToSession(
   entry: AoeListEntry,
   status: SessionStatus = "unknown",
+  summary: string | null = null,
 ): Session {
   return {
     adapter: ADAPTER_NAME,
@@ -56,8 +57,44 @@ function entryToSession(
     lastActivityAt: null,
     idleSinceAt: null,
     nativeSessionId: null,
+    summary,
     raw: entry,
   };
+}
+
+// Cap the per-session summary so the field is small enough to ride along on
+// list_sessions output without blowing the host's context budget. We collapse
+// whitespace then take the TAIL — recent activity beats startup banners, but
+// we need enough chars to span the work narrative AND the wrap-up. Empirically
+// (404-mt aoe session, 5m of activity) 500 chars only catches the wrap-up,
+// which is content-poor; 1500 chars catches the narrative too.
+const SUMMARY_MAX_CHARS = 1500;
+const SUMMARY_CAPTURE_LINES = 120;
+
+function condenseSummary(content: string): string {
+  const collapsed = content.replace(/[ \t]+/g, " ").trim();
+  if (collapsed.length <= SUMMARY_MAX_CHARS) return collapsed;
+  return "…" + collapsed.slice(-SUMMARY_MAX_CHARS);
+}
+
+async function summaryFor(id: string): Promise<string | null> {
+  try {
+    const capture = await runJson(aoeCaptureSchema, [
+      "session",
+      "capture",
+      id,
+      "--json",
+      "--strip-ansi",
+      "-n",
+      String(SUMMARY_CAPTURE_LINES),
+    ]);
+    return condenseSummary(capture.content);
+  } catch {
+    // Capture failures shouldn't fail the whole list. Sessions in error
+    // state are common in this user's catalog and may not have capturable
+    // panes.
+    return null;
+  }
 }
 
 function showToSession(show: AoeSessionShow, base: Session | null): Session {
@@ -76,6 +113,7 @@ function showToSession(show: AoeSessionShow, base: Session | null): Session {
     lastActivityAt: null,
     idleSinceAt: null,
     nativeSessionId: null,
+    summary: base?.summary ?? null,
     raw: { show, list: base?.raw ?? null },
   };
 }
@@ -87,13 +125,16 @@ export class AoeAdapter implements Adapter {
     const entries = await runJson(aoeListSchema, ["list", "--json"]);
     const enriched = await Promise.all(
       entries.map(async (e) => {
-        const show = await runJson(aoeSessionShowSchema, [
-          "session",
-          "show",
-          e.id,
-          "--json",
-        ]).catch(() => null);
-        return entryToSession(e, show?.status ?? "unknown");
+        const [show, summary] = await Promise.all([
+          runJson(aoeSessionShowSchema, [
+            "session",
+            "show",
+            e.id,
+            "--json",
+          ]).catch(() => null),
+          summaryFor(e.id),
+        ]);
+        return entryToSession(e, show?.status ?? "unknown", summary);
       }),
     );
     return enriched;

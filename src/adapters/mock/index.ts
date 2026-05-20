@@ -20,6 +20,7 @@ const SESSIONS: Session[] = [
     lastActivityAt: new Date("2026-05-20T00:00:00Z"),
     idleSinceAt: new Date("2026-05-20T00:00:00Z"),
     nativeSessionId: null,
+    summary: null,
     raw: { kind: "mock" },
   },
   {
@@ -37,6 +38,7 @@ const SESSIONS: Session[] = [
     lastActivityAt: new Date("2026-05-20T00:00:00Z"),
     idleSinceAt: null,
     nativeSessionId: null,
+    summary: null,
     raw: { kind: "mock" },
   },
 ];
