@@ -31,6 +31,12 @@ claude mcp add pepper -s user -- bun /absolute/path/to/pepper/src/index.ts
 | `send_input` | Send a message to a running agent session as if the user typed it. |
 | `send_then_wait` | Send a message and block until the agent has echoed it and the pane has settled. The canonical loop primitive. |
 | `wait_idle` | Poll until output has been unchanged for `idleWindowMs`, or `timeoutMs` elapses. |
+| `wait_for_ready` | Poll until the pane's last non-empty line ends with a known prompt cursor (`❯` for Claude Code, `›` for Codex CLI). Use before sending to a freshly-started session. |
+| `create_session` | Create a new agent session (e.g. `aoe add`). Returns the new session id and title. |
+| `start_session` | Start a stopped agent session. |
+| `stop_session` | Stop a running agent session. |
+| `restart_session` | Restart a session (stop then start). |
+| `remove_session` | Remove a session record, optionally also deleting its worktree and branch. |
 
 ## Quick start
 

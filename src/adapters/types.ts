@@ -73,11 +73,13 @@ export type Adapter = {
     lastSnapshot: OutputSnapshot;
   }>;
 
-  createSession(opts: CreateSessionOpts): Promise<{ id: string; title: string }>;
-  startSession(id: string): Promise<void>;
-  stopSession(id: string): Promise<void>;
-  restartSession(id: string): Promise<void>;
-  removeSession(id: string, opts: RemoveSessionOpts): Promise<void>;
+  // Lifecycle: optional. Adapters that wrap a read-only or non-lifecycle-aware
+  // source (e.g. a remote transcript reader) may omit any subset of these.
+  createSession?(opts: CreateSessionOpts): Promise<{ id: string; title: string }>;
+  startSession?(id: string): Promise<void>;
+  stopSession?(id: string): Promise<void>;
+  restartSession?(id: string): Promise<void>;
+  removeSession?(id: string, opts: RemoveSessionOpts): Promise<void>;
 
   sendThenWait?(id: string, text: string, opts: SendThenWaitOptions): Promise<SendThenWaitResult>;
   waitForReady?(id: string, opts: ReadyWaitOptions): Promise<ReadyWaitResult>;

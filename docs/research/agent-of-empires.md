@@ -27,7 +27,7 @@ Many read commands accept `--json`, which makes them adapter-friendly.
 | `aoe cockpit ps`                       | cockpit workers                              | `--json` |
 | `aoe cockpit tail --since <seq>`       | JSON-lines event stream (cockpit-scoped)     | inherent |
 | `aoe send <id> <message>`              | send input to agent                          | n/a (write) |
-| `aoe add [PATH]`                       | create session (`-t`, `-g`, `-c`, `--sandbox`, `--cockpit`) | n/a |
+| `aoe add [PATH]`                       | create session (`-t`, `-g`, `-c`, `--sandbox`, `--cockpit`) | n/a (text — see below) |
 | `aoe session start/stop/restart <id>`  | lifecycle                                    | n/a |
 | `aoe remove <id>`                      | delete (`--delete-worktree`, `--delete-branch`, `--force`) | n/a |
 | `aoe attach <id>` / `session attach`   | interactive — **not for adapter use**        | n/a |
@@ -35,6 +35,25 @@ Many read commands accept `--json`, which makes them adapter-friendly.
 | `aoe url --token-only`                 | discover bearer token for HTTP API           | n/a |
 
 Session identifier: accepts either the session **ID** or the **title**. The exact ID format (string slug? UUID? numeric?) is not documented — verify by running `aoe list --json` against a live install.
+
+`aoe add` does not support `--json`; it prints a human-readable block to stdout. Verified format from `aoe 1.7.0`:
+
+```text
+Running on_create hooks...
+✓ on_create hooks completed
+✓ Added session: <title>
+  Profile: default
+  Path:    <abs path>
+  Group:
+  ID:      <16-char hex>
+  Cmd:     <cmd>
+
+Next steps:
+  aoe session start <title>   # Start the session
+  aoe                         # Open TUI and press Enter to attach
+```
+
+The adapter parses the new ID off the `  ID:      <hex>` line with `/^\s*ID:\s+([a-f0-9]+)\s*$/m`. Test fixture in `tests/aoe_cli_parsing.test.ts`. If `aoe` ever changes this format, update both the regex and the fixture.
 
 ### HTTP API (`aoe serve`)
 

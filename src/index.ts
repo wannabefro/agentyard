@@ -27,6 +27,13 @@ function asJsonText(data: unknown) {
   };
 }
 
+function notImplemented(adapterName: string, method: string) {
+  return asJsonText({
+    ok: false,
+    reason: `adapter '${adapterName}' does not implement ${method}`,
+  });
+}
+
 server.registerTool(
   "list_sessions",
   {
@@ -187,9 +194,11 @@ server.registerTool(
   {
     title: "Wait for agent prompt cursor",
     description:
-      "Poll the session's pane until the last non-empty line ends with a known prompt cursor " +
-      "(❯ for Claude Code, › for Codex CLI), or until timeoutMs elapses. Use this before " +
-      "send_input when a session has just been started and the TUI may still be booting.",
+      "Poll the session's pane until the last non-empty line ends with a known prompt cursor, " +
+      "or until timeoutMs elapses. Use this before send_input when a session has just been started " +
+      "and the TUI may still be booting. Currently detects cursors for Claude Code (❯) and Codex CLI (›); " +
+      "agents with other prompt shapes (OpenCode, Gemini CLI, Copilot CLI, Mistral Vibe, Pi.dev, " +
+      "Factory Droid Coding) will time out — call this only for the supported tools.",
     inputSchema: {
       adapter: z.string(),
       id: z.string(),
@@ -224,7 +233,9 @@ server.registerTool(
     },
   },
   async ({ adapter, path, title, cmd }) => {
-    const result = await registry.get(adapter).createSession({ path, title, cmd });
+    const a = registry.get(adapter);
+    if (!a.createSession) return notImplemented(adapter, "createSession");
+    const result = await a.createSession({ path, title, cmd });
     return asJsonText({ adapter, ...result });
   },
 );
@@ -240,7 +251,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id }) => {
-    await registry.get(adapter).startSession(id);
+    const a = registry.get(adapter);
+    if (!a.startSession) return notImplemented(adapter, "startSession");
+    await a.startSession(id);
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -256,7 +269,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id }) => {
-    await registry.get(adapter).stopSession(id);
+    const a = registry.get(adapter);
+    if (!a.stopSession) return notImplemented(adapter, "stopSession");
+    await a.stopSession(id);
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -272,7 +287,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id }) => {
-    await registry.get(adapter).restartSession(id);
+    const a = registry.get(adapter);
+    if (!a.restartSession) return notImplemented(adapter, "restartSession");
+    await a.restartSession(id);
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -291,7 +308,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id, deleteWorktree, deleteBranch, force }) => {
-    await registry.get(adapter).removeSession(id, { deleteWorktree, deleteBranch, force });
+    const a = registry.get(adapter);
+    if (!a.removeSession) return notImplemented(adapter, "removeSession");
+    await a.removeSession(id, { deleteWorktree, deleteBranch, force });
     return asJsonText({ ok: true, adapter, id });
   },
 );
