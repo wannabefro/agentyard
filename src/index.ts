@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { AoeAdapter } from "@/adapters/aoe/index.ts";
 import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
+import { CodexAdapter } from "@/adapters/codex/index.ts";
 import { MockAdapter } from "@/adapters/mock/index.ts";
 import type { Session } from "@/core/session.ts";
 import { sendThenWait } from "@/core/loop.ts";
@@ -15,6 +16,7 @@ import pkg from "../package.json" with { type: "json" };
 const registry = new AdapterRegistry();
 registry.register(new AoeAdapter());
 registry.register(new ClaudeCodeAdapter());
+registry.register(new CodexAdapter());
 if (process.env.AGENTYARD_MOCK === "1") {
   registry.register(new MockAdapter());
 }
