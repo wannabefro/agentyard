@@ -37,6 +37,50 @@ function withAoeLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+// aoe's tmux session naming convention is `aoe_<title>_<id[:8]>`. Rather
+// than reconstructing the exact string (titles may be sanitized in ways we
+// don't model), enumerate tmux sessions and find the one ending in
+// `_<id[:8]>` — this is unambiguous since aoe ids are unique.
+async function findAoeTmuxSession(id: string): Promise<string | null> {
+  const idPrefix = id.slice(0, 8);
+  const proc = Bun.spawn(["tmux", "ls", "-F", "#{session_name}"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const out = await new Response(proc.stdout).text();
+  const code = await proc.exited;
+  if (code !== 0) return null;
+  const suffix = `_${idPrefix}`;
+  for (const line of out.split("\n")) {
+    const name = line.trim();
+    if (name.endsWith(suffix)) return name;
+  }
+  return null;
+}
+
+async function sendBareEnter(id: string): Promise<SendResult> {
+  const target = await findAoeTmuxSession(id);
+  if (!target) {
+    return {
+      ok: false,
+      reason: `no tmux session matching aoe_*_${id.slice(0, 8)} — session may be stopped or aoe naming changed`,
+    };
+  }
+  // C-m is the canonical tmux key for Enter. "Enter" also works on most
+  // tmux versions; C-m is the lower-level form, less likely to collide
+  // with a literal "Enter" string.
+  const proc = Bun.spawn(["tmux", "send-keys", "-t", target, "C-m"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const code = await proc.exited;
+  if (code !== 0) {
+    const err = await new Response(proc.stderr).text();
+    return { ok: false, reason: `tmux send-keys -t ${target} C-m failed (exit ${code}): ${err.trim()}` };
+  }
+  return { ok: true };
+}
+
 // U+276F (heavy right-pointing angle quotation mark) — Claude Code prompt cursor.
 // U+203A (single right-pointing angle quotation mark) — Codex CLI prompt cursor.
 const KNOWN_PROMPT_CURSORS = ["❯", "›"] as const;
@@ -277,6 +321,15 @@ export class AoeAdapter implements Adapter {
   }
 
   async sendInput(id: string, text: string): Promise<SendResult> {
+    // aoe's CLI hard-rejects empty messages ("Message cannot be empty"),
+    // but the MCP schema admits empty for bare-Enter semantics. When the
+    // caller asks for an empty send (e.g. to confirm a default selection
+    // in a TUI prompt), bypass `aoe send` and push Enter into aoe's tmux
+    // pane directly. The tmux session name follows aoe's convention
+    // `aoe_<title>_<id[:8]>`; we resolve it by id-prefix match rather than
+    // composing it ourselves, since aoe may sanitize titles in ways we
+    // don't fully model.
+    if (text === "") return sendBareEnter(id);
     try {
       await runVoid(["send", id, text]);
       return { ok: true };
