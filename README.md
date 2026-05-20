@@ -63,11 +63,11 @@ claude mcp add agentyard -s user -- agentyard
 
 | Tool | Description |
 | --- | --- |
-| `list_sessions` | List every known agent session across all registered adapters. |
+| `list_sessions` | Paginated list of every known session across adapters. Slim by default — `summary` and `raw` are opt-in (`withSummary`, `withRaw`) because a large catalog overflows MCP host token budgets. |
 | `resolve_session` | Map a natural-language reference to ranked session candidates with reasons. |
 | `get_session` | Fetch full detail for one session, including live status. |
 | `get_output` | Read the last N lines of a session's terminal pane. |
-| `send_input` | Send a message to a running agent session as if the user typed it. |
+| `send_input` | Fire-and-forget send. `ok:true` only means the CLI accepted the send, not that the agent processed it. For guaranteed delivery use `send_then_wait`. |
 | `send_then_wait` | Send a message and block until the agent has echoed it and the pane has settled. The canonical loop primitive. |
 | `wait_idle` | Poll until output has been unchanged for `idleWindowMs`, or `timeoutMs` elapses. |
 | `wait_for_ready` | Poll until the pane's last non-empty line ends with a known prompt cursor (`❯` for Claude Code, `›` for Codex CLI). Use before sending to a freshly-started session. |
@@ -76,6 +76,15 @@ claude mcp add agentyard -s user -- agentyard
 | `stop_session` | Stop a running agent session. |
 | `restart_session` | Restart a session (stop then start). |
 | `remove_session` | Remove a session record, optionally also deleting its worktree and branch. |
+
+### Handling tool results
+
+Every tool returns a single text content block. The shape depends on whether the call succeeded:
+
+- **Success.** `result.isError` is `false` (or absent). `result.content[0].text` is JSON-stringified application data — `JSON.parse` it.
+- **Failure.** `result.isError` is `true`. `result.content[0].text` is a plain error string (e.g. `MCP error -32602: Input validation error: ...` from Zod, or the message thrown by an adapter). It is **not** JSON; `JSON.parse` will throw on it.
+
+Clients must branch on `isError` before parsing. The MCP SDK packages both Zod validation errors and adapter throws this way — it's spec-compliant but easy to miss when most success responses look like JSON.
 
 ## Quick start
 

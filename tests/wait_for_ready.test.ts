@@ -72,23 +72,13 @@ function mockAdapter(opts: {
 }
 
 describe("waitForReady", () => {
-  test("succeeds when last non-empty line ends with the Claude Code cursor", async () => {
-    const adapter = mockAdapter({
-      paneScript: ["booting...", "some output\n❯", "some output\n❯"],
-    });
-    const result = await adapter.waitForReady!("sess", { timeoutMs: 1000, pollIntervalMs: 10 });
-    expect(result.ready).toBe(true);
-    expect(result.lastLine.endsWith("❯")).toBe(true);
-  });
-
-  test("times out when no known cursor ever appears", async () => {
-    const adapter = mockAdapter({
-      paneScript: ["loading...", "still loading..."],
-    });
-    const result = await adapter.waitForReady!("sess", { timeoutMs: 80, pollIntervalMs: 15 });
-    expect(result.ready).toBe(false);
-    expect(result.reason).toContain("prompt cursor not detected");
-  });
+  // The two prior tests here (succeeds-on-cursor / times-out-without-cursor)
+  // exercised a hand-rolled copy of the waitForReady logic embedded in
+  // mockAdapter — they tested the mock, not the production heuristic. After
+  // 0.1.5 extracted findRecentPromptCursorLine, the fixture-driven describe
+  // block below is the real coverage, and the sendThenWait short-circuit
+  // test below it exercises waitForReady as a dependency of the full loop.
+  // The redundant tests were removed.
 
   // Direct coverage of the real heuristic in src/adapters/aoe/index.ts —
   // distinct from the mock above which has its own copy. The dogfood pass
