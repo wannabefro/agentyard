@@ -107,7 +107,8 @@ server.registerTool(
   "get_output",
   {
     title: "Get session output",
-    description: "Read the last N lines of a session's terminal pane.",
+    description:
+      "Read the last N lines of a session's output. Always returns flat `content` (string) and `lines` (number). Conversation-shaped adapters (e.g. claude-code) also return `structured`: an array of {role, text, timestamp?, kind?} messages so hosts can render or filter typed messages without re-parsing the flat text.",
     inputSchema: {
       adapter: z.string(),
       id: z.string(),

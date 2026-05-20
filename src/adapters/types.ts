@@ -1,8 +1,24 @@
 import type { Session } from "@/core/session.ts";
 
+// Optional structured output for adapters whose underlying source is
+// conversation-shaped (transcripts, message logs) rather than raw terminal
+// text. `content` remains the canonical flat-text rendering — every adapter
+// populates it. Adapters that wrap unstructured panes (e.g. tmux via aoe)
+// leave `structured` undefined.
+export type SessionMessage = {
+  role: "user" | "assistant" | "system" | "tool";
+  text: string;
+  timestamp?: string;
+  // Adapter-specific subtype, e.g. "tool_use", "tool_result", "thinking".
+  // Hosts may use this to filter or render differently but should not depend
+  // on a fixed enum — values vary by adapter.
+  kind?: string;
+};
+
 export type OutputSnapshot = {
   content: string;
   lines: number;
+  structured?: SessionMessage[];
 };
 
 export type SendResult = {

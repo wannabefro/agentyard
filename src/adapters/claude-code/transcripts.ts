@@ -1,6 +1,8 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { SessionMessage } from "@/adapters/types.ts";
+
 export type TranscriptRecord = {
   type: string;
   [key: string]: unknown;
@@ -150,6 +152,79 @@ function renderAssistantContent(content: AssistantContentBlock[] | string | unde
 function truncate(s: string, max = 400): string {
   if (s.length <= max) return s;
   return s.slice(0, max) + "…";
+}
+
+export function extractMessages(
+  records: TranscriptRecord[],
+  opts: RenderOptions = {},
+): SessionMessage[] {
+  const max = opts.maxRecords ?? 50;
+  const chat = records.filter((r) => r.type === "user" || r.type === "assistant");
+  const tail = chat.slice(-max);
+
+  const out: SessionMessage[] = [];
+  for (const r of tail) {
+    const message = (r as { message?: { role?: string; content?: unknown } }).message;
+    if (!message) continue;
+    const timestamp = typeof r.timestamp === "string" ? r.timestamp : undefined;
+
+    if (r.type === "user") {
+      const contents = collectUserMessages(message.content);
+      for (const c of contents) {
+        out.push({ role: c.kind === "tool_result" ? "tool" : "user", text: c.text, timestamp, kind: c.kind });
+      }
+    } else if (r.type === "assistant") {
+      const contents = collectAssistantMessages(message.content as AssistantContentBlock[] | string | undefined);
+      for (const c of contents) {
+        out.push({ role: "assistant", text: c.text, timestamp, kind: c.kind });
+      }
+    }
+  }
+  return out;
+}
+
+type ExtractedPart = { text: string; kind?: string };
+
+function collectUserMessages(content: unknown): ExtractedPart[] {
+  if (typeof content === "string") {
+    const t = content.trim();
+    return t ? [{ text: t }] : [];
+  }
+  if (!Array.isArray(content)) return [];
+  const out: ExtractedPart[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object" || !("type" in item)) continue;
+    const node = item as { type: string; content?: unknown; text?: string };
+    if (node.type === "tool_result") {
+      const c = node.content;
+      if (typeof c === "string") out.push({ text: truncate(c), kind: "tool_result" });
+    } else if (node.type === "text" && typeof node.text === "string") {
+      out.push({ text: node.text });
+    }
+  }
+  return out;
+}
+
+function collectAssistantMessages(
+  content: AssistantContentBlock[] | string | undefined,
+): ExtractedPart[] {
+  if (typeof content === "string") {
+    const t = content.trim();
+    return t ? [{ text: t }] : [];
+  }
+  if (!Array.isArray(content)) return [];
+  const out: ExtractedPart[] = [];
+  for (const block of content) {
+    if (block.type === "text") {
+      const t = (block as { text?: string }).text;
+      if (t) out.push({ text: t });
+    } else if (block.type === "tool_use") {
+      const name = (block as { name?: string }).name ?? "tool";
+      out.push({ text: `[tool_use ${name}]`, kind: "tool_use" });
+    }
+    // Skip thinking blocks — same policy as renderConversation.
+  }
+  return out;
 }
 
 export type DiscoveredTranscript = {

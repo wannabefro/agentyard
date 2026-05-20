@@ -5,6 +5,7 @@ import type { Adapter, OutputSnapshot } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
 import {
   discoverTranscripts,
+  extractMessages,
   readAllRecords,
   renderConversation,
   summarize,
@@ -51,7 +52,12 @@ export class ClaudeCodeAdapter implements Adapter {
     if (!match) return { content: "", lines: 0 };
     const records = await readAllRecords(match.path);
     const content = renderConversation(records, { maxRecords: lines });
-    return { content, lines: content ? content.split("\n").length : 0 };
+    const structured = extractMessages(records, { maxRecords: lines });
+    return {
+      content,
+      lines: content ? content.split("\n").length : 0,
+      structured,
+    };
   }
 }
 

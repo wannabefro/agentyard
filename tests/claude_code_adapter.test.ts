@@ -193,6 +193,32 @@ describe("ClaudeCodeAdapter", () => {
       .toBeLessThan(snap.content.indexOf("I'll profile it first."));
   });
 
+  test("getOutput populates structured messages alongside flat content", async () => {
+    const projectDir = join(root, "-tmp-structured");
+    mkdirSync(projectDir, { recursive: true });
+
+    const sessionId = "ab000001-0000-0000-0000-000000000000";
+    writeFileSync(
+      join(projectDir, `${sessionId}.jsonl`),
+      buildMinimalTranscript({
+        sessionId,
+        cwd: "/tmp/structured",
+        userText: "what's broken?",
+        assistantText: "the auth flow.",
+      }),
+    );
+
+    const adapter: Adapter = new ClaudeCodeAdapter({ projectsRoot: root });
+    const snap = await adapter.getOutput(sessionId);
+
+    expect(snap.structured).toBeDefined();
+    expect(snap.structured!.length).toBeGreaterThanOrEqual(2);
+    const first = snap.structured!.find((m) => m.role === "user");
+    const second = snap.structured!.find((m) => m.role === "assistant");
+    expect(first?.text).toContain("what's broken?");
+    expect(second?.text).toContain("the auth flow.");
+  });
+
   test("tolerates unknown record types and a truncated final line", async () => {
     const projectDir = join(root, "-tmp-y");
     mkdirSync(projectDir, { recursive: true });
