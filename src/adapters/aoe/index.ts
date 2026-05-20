@@ -10,7 +10,7 @@ import type {
   SendResult,
 } from "@/adapters/types.ts";
 import type { Session, SessionStatus } from "@/core/session.ts";
-import { spawnEnv } from "@/core/spawn_env.ts";
+import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
 import { AoeCliError, runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
 import {
   aoeCaptureSchema,
@@ -44,7 +44,7 @@ function withAoeLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
 // `_<id[:8]>` — this is unambiguous since aoe ids are unique.
 async function findAoeTmuxSession(id: string): Promise<string | null> {
   const idPrefix = id.slice(0, 8);
-  const proc = Bun.spawn(["tmux", "ls", "-F", "#{session_name}"], {
+  const proc = Bun.spawn([findBinary("tmux"), "ls", "-F", "#{session_name}"], {
     env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
@@ -71,7 +71,7 @@ async function sendBareEnter(id: string): Promise<SendResult> {
   // C-m is the canonical tmux key for Enter. "Enter" also works on most
   // tmux versions; C-m is the lower-level form, less likely to collide
   // with a literal "Enter" string.
-  const proc = Bun.spawn(["tmux", "send-keys", "-t", target, "C-m"], {
+  const proc = Bun.spawn([findBinary("tmux"), "send-keys", "-t", target, "C-m"], {
     env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",

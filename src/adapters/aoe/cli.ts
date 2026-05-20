@@ -1,6 +1,6 @@
 import type { ZodTypeAny, z } from "zod";
 
-import { spawnEnv } from "@/core/spawn_env.ts";
+import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
 
 class AoeCliError extends Error {
   constructor(
@@ -23,7 +23,7 @@ async function runJson<S extends ZodTypeAny>(
   schema: S,
   argv: string[],
 ): Promise<z.infer<S>> {
-  const proc = Bun.spawn(["aoe", ...argv], {
+  const proc = Bun.spawn([findBinary("aoe"), ...argv], {
     env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
@@ -54,7 +54,7 @@ async function runJson<S extends ZodTypeAny>(
 }
 
 async function runVoid(argv: string[]): Promise<void> {
-  const proc = Bun.spawn(["aoe", ...argv], {
+  const proc = Bun.spawn([findBinary("aoe"), ...argv], {
     env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
@@ -73,7 +73,7 @@ async function runVoid(argv: string[]): Promise<void> {
 }
 
 async function runRaw(argv: string[]): Promise<{ stdout: string; stderr: string }> {
-  const proc = Bun.spawn(["aoe", ...argv], {
+  const proc = Bun.spawn([findBinary("aoe"), ...argv], {
     env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",

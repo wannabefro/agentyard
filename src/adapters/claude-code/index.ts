@@ -9,7 +9,7 @@ import type {
   SendThenWaitResult,
 } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
-import { spawnEnv } from "@/core/spawn_env.ts";
+import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
 import {
   discoverTranscripts,
   extractMessages,
@@ -118,7 +118,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const before = await this.getOutput(id, 200);
 
     const proc = Bun.spawn(
-      ["claude", "--resume", id, "--print", "--output-format", "json", text],
+      [findBinary("claude"), "--resume", id, "--print", "--output-format", "json", text],
       {
         cwd: session.workdir,
         env: spawnEnv(),
