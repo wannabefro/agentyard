@@ -1,6 +1,6 @@
 {
   "name": "agentyard",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Adapter-based MCP orchestrator for AI coding agent sessions (Agent of Empires, Claude Code transcripts).",
   "type": "module",
   "license": "MIT",
