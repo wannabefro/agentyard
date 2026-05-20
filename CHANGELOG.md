@@ -10,6 +10,8 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-20
+
 ### Changed (breaking, pre-1.0)
 
 - **`list_sessions` MCP tool now returns a slim, paginated response.**
@@ -30,6 +32,16 @@ or exact version if you depend on this externally.
 - **`AdapterRegistry` now caches slim and full listings in separate
   buckets.** A slim `list_sessions` call no longer poisons the full
   listing that `resolve_session` relies on, and vice versa.
+- **`waitForReady` no longer reports ready=true on a selector menu.**
+  Previously the 0.1.5 lenient cursor scan matched any `❯ <text>` line,
+  including the first-boot trust prompt's `❯ 1. Yes, I trust this folder`.
+  Cursor lines that look like menu options (`❯ N. <text>`) are now
+  rejected when corroborated by a peer numbered option or a navigation
+  hint (`Enter to confirm`, `Esc to cancel`, `↑/↓`). Callers must dismiss
+  selector menus (e.g. `send_input("1")` or a bare Enter via the relaxed
+  schema) before `waitForReady` returns success. The change keeps the
+  happy-path same-tick fast — the live concurrent-lifecycle dogfood
+  reports the same 1.63s wall time as before.
 
 ### Fixed
 
@@ -49,6 +61,30 @@ or exact version if you depend on this externally.
   `min(1)`). Lets callers send a bare Enter to confirm default selections
   in TUI prompts (e.g. Claude Code's first-run trust prompt). Non-empty
   text still works unchanged.
+- **`send_input` MCP tool description is honest about its contract.**
+  `ok: true` only means the CLI accepted the send, not that the agent
+  processed it. Against sessions aoe classifies as `error` / `stopped`,
+  the auto-revive race can leave keystrokes staged but unsubmitted. For
+  guaranteed delivery, callers should prefer `send_then_wait`, which
+  polls the pane for evidence the agent saw the input.
+
+### Documentation
+
+- README has a "Handling tool results" section documenting MCP `isError`
+  semantics — clients must check `result.isError === true` before
+  attempting `JSON.parse` on the content text. The MCP SDK packages both
+  Zod validation errors and adapter throws as text content with the
+  `isError` flag.
+
+### Tests
+
+- New live-dogfood probes (committed, not part of `bun test`):
+  `tests/live_dogfood_concurrent_lifecycle.ts`,
+  `tests/live_dogfood_send_semantics.ts`,
+  `tests/live_dogfood_delete_worktree.ts`,
+  `tests/live_dogfood_active_transcript.ts`. New profile harness:
+  `tests/resolver_perf.ts` characterizes resolver scaling at 150 / 500 /
+  1000 synthetic sessions.
 
 ## [0.1.5] - 2026-05-20
 

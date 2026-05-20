@@ -56,11 +56,23 @@ function lastNonEmptyLine(content: string): string {
 // cursors embedded in scrollback content.
 const PROMPT_SCAN_WINDOW = 20;
 
-// Returns the most recent line that looks like a prompt-cursor line
-// (cursor at line-start, optionally followed by whitespace or menu/text),
-// or null if no such line is in the recent pane window. This replaces the
-// older "lastNonEmptyLine ends with cursor" heuristic, which broke when
-// agents started rendering footers below the input.
+// How many lines on either side of a candidate cursor line to scan for
+// menu-disambiguation signals (peer numbered options, navigation hints).
+const MENU_DISAMBIG_WINDOW = 5;
+
+// `❯ N. text` — the cursor sitting on a numbered menu option.
+const NUMBERED_OPTION_RE = /^(\d+)\.\s+\S/;
+
+// Navigation hints rendered by selector menus. Trust prompt: "Enter to
+// confirm · Esc to cancel". Many other menus use "↑/↓" or "Tab".
+const MENU_NAV_HINT_RE = /(enter to (confirm|select)|esc to (cancel|exit)|↑.{0,3}↓|use\s+(arrow|↑|↓))/i;
+
+// Returns the most recent line that looks like a real prompt cursor line —
+// cursor at line-start, optionally followed by free user input. Selector
+// menus (cursor sitting on a numbered option with peer options or a nav
+// hint nearby) are rejected and the scan continues looking further up the
+// pane for a real prompt. Returns null if no real prompt cursor is in the
+// recent window.
 //
 // Exported only for direct test coverage — production callers should use
 // AoeAdapter.waitForReady.
@@ -77,11 +89,39 @@ export function findRecentPromptCursorLine(content: string): string | null {
       // Match "❯" alone or "❯ <anything>". Avoids matching a cursor
       // glyph embedded mid-word.
       if (trimmed === cursor || trimmed.startsWith(cursor + " ")) {
+        if (isMenuCursor(tail, i, trimmed, cursor)) continue;
         return line;
       }
     }
   }
   return null;
+}
+
+function isMenuCursor(
+  tail: string[],
+  idx: number,
+  trimmedCursorLine: string,
+  cursor: string,
+): boolean {
+  const afterCursor = trimmedCursorLine.slice(cursor.length).trimStart();
+  const cursorMatch = NUMBERED_OPTION_RE.exec(afterCursor);
+  if (!cursorMatch) return false;
+  const cursorNumber = cursorMatch[1];
+
+  // Scan a small window around the candidate for corroborating signals.
+  // A real prompt with the user typing "1. foo" has no peer numbered line
+  // and no nav hint — it falls through to "not a menu". A selector menu
+  // typically has at least one of these.
+  const lo = Math.max(0, idx - MENU_DISAMBIG_WINDOW);
+  const hi = Math.min(tail.length - 1, idx + MENU_DISAMBIG_WINDOW);
+  for (let j = lo; j <= hi; j += 1) {
+    if (j === idx) continue;
+    const peer = tail[j]!.trimStart();
+    const peerMatch = NUMBERED_OPTION_RE.exec(peer);
+    if (peerMatch && peerMatch[1] !== cursorNumber) return true;
+    if (MENU_NAV_HINT_RE.test(peer)) return true;
+  }
+  return false;
 }
 
 function parseDate(value: string | undefined | null): Date | null {

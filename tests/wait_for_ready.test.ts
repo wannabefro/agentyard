@@ -109,9 +109,11 @@ describe("waitForReady", () => {
       expect(result).toBe("❯");
     });
 
-    test("detects cursor in a menu (cursor + selection text)", () => {
+    test("rejects cursor on selector menu (peer numbered option present)", () => {
       // Trust prompt on first agent boot. The cursor is on the "Yes"
-      // option line, not at the trailing position.
+      // option line. waitForReady must NOT treat this as a real prompt —
+      // sending free text into a selector menu has no effect. The caller
+      // is expected to dismiss the menu first (send_input("1") or Enter).
       const pane = [
         "Quick safety check: Is this a project you trust?",
         "",
@@ -120,8 +122,33 @@ describe("waitForReady", () => {
         "",
         "Enter to confirm · Esc to cancel",
       ].join("\n");
-      const result = findRecentPromptCursorLine(pane);
-      expect(result).toBe("❯ 1. Yes, I trust this folder");
+      expect(findRecentPromptCursorLine(pane)).toBeNull();
+    });
+
+    test("rejects cursor on selector menu when nav hint alone identifies it", () => {
+      // Defensive: a menu with only one visible option still gets rejected
+      // because the nav hint betrays its kind.
+      const pane = [
+        "Choose how to proceed:",
+        "",
+        "❯ 1. Continue with the operation",
+        "",
+        "Enter to confirm · Esc to cancel",
+      ].join("\n");
+      expect(findRecentPromptCursorLine(pane)).toBeNull();
+    });
+
+    test("accepts cursor with numbered user input when no menu signals are present", () => {
+      // The user typed "1. foo" into the input box (starting a numbered
+      // list). No peer numbered line, no nav hint nearby — this is a real
+      // prompt with user-typed content, not a selector menu.
+      const pane = [
+        "────────────────────────────────────────",
+        "❯ 1. foo",
+        "────────────────────────────────────────",
+        "   [Opus 4.7] some-session | 12% ctx | $0.42",
+      ].join("\n");
+      expect(findRecentPromptCursorLine(pane)).toBe("❯ 1. foo");
     });
 
     test("detects the Codex CLI single-angle cursor", () => {
