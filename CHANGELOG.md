@@ -10,6 +10,38 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-20
+
+### Fixed
+
+- **`send_input("")` actually delivers a bare Enter.** 0.2.0's schema
+  description claimed it would; aoe's CLI hard-rejects empty messages
+  with `Error: Message cannot be empty`, so the promise was a lie. Empty
+  text now bypasses `aoe send` and pushes `C-m` through `tmux send-keys`
+  on the session's tmux pane (located by id-prefix match against aoe's
+  `aoe_<title>_<id[:8]>` naming). Verified live: dismisses the Claude
+  Code trust prompt cleanly in ~20ms.
+- **`waitForReady` returns an actionable reason when a selector menu is
+  detected.** Previously the rejected-menu case fell through to the
+  generic "prompt cursor not detected within Xms" message — true but
+  unhelpful. Now: "agent showing a selector menu; dismiss it (e.g.
+  send_input("") for default, or send_input("<digit>") for a specific
+  option) before sending text" — and `lastLine` points at the menu
+  cursor.
+- **`sendThenWait` preserves `waitForReady`'s contextual reason.** The
+  loop primitive was dropping `ready.reason` and substituting a generic
+  string; MCP hosts calling `send_then_wait` against a menu pane lost
+  the actionable hint. The adapter's reason now propagates upward.
+
+### Tests
+
+- New live dogfood probes (committed, not part of `bun test`):
+  `tests/live_dogfood_bare_enter.ts`,
+  `tests/live_dogfood_multi_turn.ts`. The multi-turn probe drives a
+  throwaway aoe Claude Code session through three sequential
+  `sendThenWait` calls and verifies each turn produces a distinct token
+  — the canonical orchestrator use case, end-to-end (~7.6s/turn).
+
 ## [0.2.0] - 2026-05-20
 
 ### Changed (breaking, pre-1.0)
