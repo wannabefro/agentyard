@@ -10,6 +10,21 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-20
+
+### Fixed
+
+- Published npm package was missing `tsconfig.json`, so the `@/` path alias
+  used throughout `src/` failed to resolve and `bunx agentyard` crashed
+  immediately with `Cannot find module '@/adapters/aoe/index.ts'`. The
+  config is now included in the published files. Discovered by installing
+  v0.1.0 from npm in a clean directory.
+
+### Changed
+
+- README documents the npm install path (`bun add -g agentyard`) and the
+  matching `claude mcp add` command in addition to the clone-and-run flow.
+
 ## [0.1.0] - 2026-05-20
 
 Initial pre-release.
@@ -36,5 +51,6 @@ Initial pre-release.
   `docs/research/claude-code.md`. The Conductor.build exploration is parked
   in `docs/research/conductor.md` for a possible later adapter.
 
-[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/wannabefro/agentyard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/wannabefro/agentyard/releases/tag/v0.1.0

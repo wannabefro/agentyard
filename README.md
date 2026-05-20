@@ -15,17 +15,35 @@ Adapters in this repo:
 
 Requires Bun >= 1.3, macOS or Linux. The `aoe` adapter additionally requires the [`aoe` CLI](https://www.agent-of-empires.com) (1.7+). The `claude-code` adapter has no runtime dependencies — it reads transcript files directly.
 
+Install globally from npm:
+
 ```bash
+bun add -g agentyard
+```
+
+Or run from a clone:
+
+```bash
+git clone https://github.com/wannabefro/agentyard.git
+cd agentyard
 bun install
 ```
 
 ## Register as MCP server in Claude Code
 
+If installed globally:
+
+```bash
+claude mcp add agentyard -s user -- agentyard
+```
+
+If running from a clone:
+
 ```bash
 claude mcp add agentyard -s user -- bun /absolute/path/to/agentyard/src/index.ts
 ```
 
-`-s user` registers the server in the user-scoped Claude Code config, making `agentyard` available across every Claude Code session on the machine. Replace `/absolute/path/to/agentyard` with the absolute path to your checkout.
+`-s user` registers the server in the user-scoped Claude Code config, making `agentyard` available across every Claude Code session on the machine.
 
 ## Available MCP tools
 
