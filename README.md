@@ -9,7 +9,7 @@
 Adapters in this repo:
 
 - **`aoe`** — wraps [Agent of Empires](https://github.com/njbrake/agent-of-empires) (`aoe` 1.7+). Read + write: snapshots tmux panes, sends input, drives loops, manages session lifecycle.
-- **`claude-code`** — reads Claude Code session transcripts from `~/.claude/projects/`. Read-only at v0.1; surfaces every transcript on disk as a `Session` with title, working directory, branch, and last-activity time.
+- **`claude-code`** — reads Claude Code session transcripts from `~/.claude/projects/` and writes new turns via `claude --resume`. Surfaces every transcript on disk as a `Session` with title, working directory, branch, and last-activity time. Writes go through `send_then_wait` (synchronous; the underlying CLI is one-subprocess-per-turn). `send_input` is not supported on this adapter — there is no fire-and-forget primitive for Claude Code.
 
 ## Install
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Adapter } from "@/adapters/types.ts";
-import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
+import { ClaudeCodeAdapter, parseClaudePrintResult } from "@/adapters/claude-code/index.ts";
 
 function makeTranscriptLine(record: object): string {
   return JSON.stringify(record) + "\n";
@@ -315,9 +315,52 @@ describe("ClaudeCodeAdapter", () => {
     expect(sessions[0]!.id).toBe(sessionId);
   });
 
-  test("does not implement sendInput or waitIdle", () => {
+  test("does not implement sendInput or waitIdle (write path is sendThenWait)", () => {
     const adapter: Adapter = new ClaudeCodeAdapter({ projectsRoot: root });
     expect(adapter.sendInput).toBeUndefined();
     expect(adapter.waitIdle).toBeUndefined();
+    // sendThenWait is the write path — it spawns `claude --resume`. Asserted
+    // present so the omission of sendInput/waitIdle reads as intentional.
+    expect(adapter.sendThenWait).toBeDefined();
+  });
+});
+
+describe("parseClaudePrintResult", () => {
+  test("parses a single-line success JSON result", () => {
+    const stdout = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "alphaCC",
+      session_id: "abc-123",
+    });
+    const parsed = parseClaudePrintResult(stdout);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.result).toBe("alphaCC");
+    expect(parsed!.is_error).toBe(false);
+  });
+
+  test("walks lines backward and finds the JSON result amid diagnostic lines", () => {
+    // Real Claude Code CLI invocations sometimes emit diagnostic lines
+    // alongside the JSON result. Parser should be robust to that.
+    const stdout = [
+      "some diagnostic line",
+      "warning: blah blah",
+      JSON.stringify({ type: "result", is_error: false, result: "ok" }),
+    ].join("\n");
+    const parsed = parseClaudePrintResult(stdout);
+    expect(parsed?.result).toBe("ok");
+  });
+
+  test("returns null when no JSON result is present", () => {
+    expect(parseClaudePrintResult("plain text only")).toBeNull();
+    expect(parseClaudePrintResult("")).toBeNull();
+  });
+
+  test("ignores JSON without a 'type' field (defensive against partial output)", () => {
+    // A bare `{}` parses but isn't the result object — must not be returned
+    // as a false-positive ClaudePrintResult.
+    const stdout = "{}\n" + JSON.stringify({ random: "thing" });
+    expect(parseClaudePrintResult(stdout)).toBeNull();
   });
 });

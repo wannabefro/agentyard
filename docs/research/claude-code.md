@@ -157,6 +157,76 @@ The user deferred this until research was in. Options reconsidered with on-disk 
 
 Recommend: ship v0.1 read-only. Probe `claude --resume` capability separately and revisit for v0.2 only if it cleanly supports non-interactive prompt injection.
 
+## Write support — empirical findings (2026-05-20, post-v0.2.1)
+
+`claude --resume <session-id> --print --output-format json <prompt>` works as a one-shot write primitive. Verified live against `claude` v2.1.145.
+
+### Invocation shape
+
+```bash
+cd <session-cwd> && claude --resume <session-uuid> --print --output-format json "<prompt>"
+```
+
+`--print` prints the response to stdout and exits; `--output-format json` produces a single JSON object on stdout.
+
+### Output schema (from a successful run)
+
+```json
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 3071,
+  "duration_api_ms": 2333,
+  "ttft_ms": 2876,
+  "num_turns": 1,
+  "result": "bravoCC",
+  "stop_reason": "end_turn",
+  "session_id": "11111111-2222-3333-4444-555555555555",
+  "total_cost_usd": 0.35263625,
+  "usage": { ... },
+  "modelUsage": { "claude-opus-4-7": { "inputTokens": 6, "outputTokens": 9, "cacheCreationInputTokens": 56381, ... } },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "uuid": "<this-turn-uuid>"
+}
+```
+
+The `result` field carries the agent's text response. The session id is preserved across resume — same id, additional turns appended to the same JSONL.
+
+### Critical: `--resume` is cwd-dependent
+
+The transcript lives at `~/.claude/projects/<slug>/<uuid>.jsonl` where `<slug>` is derived from the cwd at session creation. `claude --resume <uuid>` invoked from a different cwd fails with `"No conversation found with session ID: <uuid>"` even though the transcript file exists on disk.
+
+Resolution: before invoking, set the subprocess cwd to the original session cwd. Our existing claude-code adapter extracts `summary.cwd` from each transcript via `summarize()` — we already have what we need.
+
+If the original cwd path no longer exists on the filesystem, recreating an empty directory at that path is sufficient for `--resume` to find the session. The lookup is path-based, not existence-based at the parent level. Confirmed by recreating the original tmp path after it was deleted.
+
+### Cost characteristics
+
+- ~$0.35 per turn for short prompts under default model (`claude-opus-4-7`)
+- Bulk of cost is `cacheCreationInputTokens` (~56K tokens) — each subprocess re-creates the prompt cache; there's no warm cache across separate invocations
+- Subsequent turns within the same subprocess would share cache, but `--print` exits after one turn — so the orchestrator pattern of "spawn fresh, one turn, exit" pays the cache-creation cost every time
+- For reference: aoe-wrapped Claude Code sessions reuse one long-running process, so they amortize the cache cost across many turns inside one session. agentyard's claude-code write path can't replicate that — the trade-off is between "spawn-per-turn" simplicity and "long-running process" cost efficiency
+
+### Failure modes to handle
+
+- **Cwd mismatch / session not found.** stderr emits `No conversation found with session ID: <uuid>`. Distinguish from genuine "session doesn't exist".
+- **Session currently active in another Claude Code instance.** Untested whether `--resume` allows concurrent attach. The user's main Claude Code session (the one running this conversation) is a candidate failure case — we should avoid resuming a session that's already attached.
+- **Permission denials.** The `permission_denials` array surfaces tool calls Claude wanted to make but couldn't. Should be surfaced through the adapter contract.
+
+### Adapter contract decision
+
+- `ClaudeCodeAdapter.sendThenWait` → implement as the canonical write path.
+  - Snapshot transcript via `getOutput` before
+  - Spawn `claude --resume <id> --print --output-format json <text>` with cwd from session
+  - Parse stdout JSON, treat `is_error: true` as failure
+  - Snapshot transcript after (now contains the new turn)
+  - Return `SendThenWaitResult { ok, changed: true, settled: true, before, after, elapsedMs }`
+- `ClaudeCodeAdapter.sendInput` → **omit**. The claude write path is fundamentally synchronous (the subprocess blocks until the agent turn completes). Calling it "fire-and-forget" would be the same kind of misleading contract `send_input("")` was in 0.2.0. Hosts that want fire-and-forget should use aoe; hosts that want guaranteed delivery should use `sendThenWait` on either adapter.
+- `ClaudeCodeAdapter.waitIdle` / `waitForReady` → leave omitted. Not applicable — there's no terminal pane, no polling, no boot window.
+- Lifecycle (`create/start/stop/restart/remove`) → leave omitted for v0.3. We could implement `createSession` via `claude --print` to a fresh session-id and `removeSession` via filesystem delete, but the use case (orchestrator-driven session creation for claude-code agents) isn't yet present.
+
 ## Anti-patterns to avoid
 
 - Do not decode the encoded directory name to reconstruct the cwd. Read it from inside the transcript.
