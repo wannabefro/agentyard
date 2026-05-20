@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CodexAdapter } from "@/adapters/codex/index.ts";
+import { CodexAdapter, parseEventStream } from "@/adapters/codex/index.ts";
 import {
   parseLines,
   renderConversation,
@@ -232,6 +232,38 @@ describe("codex rollouts.renderConversation", () => {
     );
     const out = renderConversation(parseLines(text));
     expect(out).not.toContain("internal CoT");
+  });
+});
+
+describe("parseEventStream (codex exec --json stdout)", () => {
+  test("parses the canonical 4-event sequence", () => {
+    const stdout = [
+      '{"type":"thread.started","thread_id":"019e465b"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"CHARLIE"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":41255,"cached_input_tokens":12032,"output_tokens":81,"reasoning_output_tokens":65}}',
+    ].join("\n");
+    const events = parseEventStream(stdout);
+    expect(events).toHaveLength(4);
+    expect(events[0]!.type).toBe("thread.started");
+    expect(events[2]!.item?.type).toBe("agent_message");
+    expect(events[3]!.usage?.input_tokens).toBe(41255);
+  });
+
+  test("skips noisy non-JSON lines", () => {
+    const stdout = [
+      "Reading additional input from stdin...",
+      '{"type":"thread.started","thread_id":"x"}',
+      "OpenAI Codex v0.132.0",
+      '{"type":"turn.completed","usage":{}}',
+    ].join("\n");
+    const events = parseEventStream(stdout);
+    expect(events).toHaveLength(2);
+  });
+
+  test("ignores records without a string type", () => {
+    const stdout = '{"foo":"bar"}\n{"type":42}\n';
+    expect(parseEventStream(stdout)).toEqual([]);
   });
 });
 
