@@ -62,4 +62,24 @@ async function runVoid(argv: string[]): Promise<void> {
   }
 }
 
-export { runJson, runVoid, AoeCliError };
+async function runRaw(argv: string[]): Promise<{ stdout: string; stderr: string }> {
+  const proc = Bun.spawn(["aoe", ...argv], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new AoeCliError(
+      `aoe ${argv.join(" ")} failed with exit ${exitCode}`,
+      exitCode,
+      stderr,
+    );
+  }
+  return { stdout, stderr };
+}
+
+export { runJson, runVoid, runRaw, AoeCliError };

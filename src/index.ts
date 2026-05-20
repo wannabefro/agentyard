@@ -143,14 +143,16 @@ server.registerTool(
       idleTimeoutMs: z.number().int().min(1000).max(600_000).default(120_000),
       idleWindowMs: z.number().int().min(500).max(60_000).default(5_000),
       pollIntervalMs: z.number().int().min(250).max(10_000).default(1000),
+      readyTimeoutMs: z.number().int().min(500).max(120_000).default(30_000),
     },
   },
-  async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs }) => {
+  async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs, readyTimeoutMs }) => {
     const result = await sendThenWait(registry.get(adapter), id, text, {
       changeTimeoutMs,
       idleTimeoutMs,
       idleWindowMs,
       pollIntervalMs,
+      readyTimeoutMs,
     });
     return asJsonText(result);
   },
@@ -177,6 +179,120 @@ server.registerTool(
       pollIntervalMs,
     });
     return asJsonText(result);
+  },
+);
+
+server.registerTool(
+  "wait_for_ready",
+  {
+    title: "Wait for agent prompt cursor",
+    description:
+      "Poll the session's pane until the last non-empty line ends with a known prompt cursor " +
+      "(❯ for Claude Code, › for Codex CLI), or until timeoutMs elapses. Use this before " +
+      "send_input when a session has just been started and the TUI may still be booting.",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+      timeoutMs: z.number().int().min(500).max(120_000).default(30_000),
+      pollIntervalMs: z.number().int().min(250).max(10_000).default(500),
+    },
+  },
+  async ({ adapter, id, timeoutMs, pollIntervalMs }) => {
+    const a = registry.get(adapter);
+    if (!a.waitForReady) {
+      return asJsonText({
+        ready: false,
+        reason: `adapter '${adapter}' does not implement waitForReady`,
+        lastLine: "",
+      });
+    }
+    const result = await a.waitForReady(id, { timeoutMs, pollIntervalMs });
+    return asJsonText(result);
+  },
+);
+
+server.registerTool(
+  "create_session",
+  {
+    title: "Create session",
+    description: "Create a new agent session via the adapter (e.g. `aoe add`). Returns the new session id and title.",
+    inputSchema: {
+      adapter: z.string().describe("Adapter name, e.g. 'aoe'"),
+      path: z.string().min(1).describe("Absolute path the session should work in"),
+      title: z.string().optional().describe("Human-readable session title"),
+      cmd: z.string().default("claude").describe("Agent command to run (default: claude)"),
+    },
+  },
+  async ({ adapter, path, title, cmd }) => {
+    const result = await registry.get(adapter).createSession({ path, title, cmd });
+    return asJsonText({ adapter, ...result });
+  },
+);
+
+server.registerTool(
+  "start_session",
+  {
+    title: "Start session",
+    description: "Start a stopped agent session.",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+    },
+  },
+  async ({ adapter, id }) => {
+    await registry.get(adapter).startSession(id);
+    return asJsonText({ ok: true, adapter, id });
+  },
+);
+
+server.registerTool(
+  "stop_session",
+  {
+    title: "Stop session",
+    description: "Stop a running agent session.",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+    },
+  },
+  async ({ adapter, id }) => {
+    await registry.get(adapter).stopSession(id);
+    return asJsonText({ ok: true, adapter, id });
+  },
+);
+
+server.registerTool(
+  "restart_session",
+  {
+    title: "Restart session",
+    description: "Restart a session (stop then start).",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+    },
+  },
+  async ({ adapter, id }) => {
+    await registry.get(adapter).restartSession(id);
+    return asJsonText({ ok: true, adapter, id });
+  },
+);
+
+server.registerTool(
+  "remove_session",
+  {
+    title: "Remove session",
+    description: "Remove a session record and optionally its worktree/branch.",
+    inputSchema: {
+      adapter: z.string(),
+      id: z.string(),
+      deleteWorktree: z.boolean().default(false),
+      deleteBranch: z.boolean().default(false),
+      force: z.boolean().default(false),
+    },
+  },
+  async ({ adapter, id, deleteWorktree, deleteBranch, force }) => {
+    await registry.get(adapter).removeSession(id, { deleteWorktree, deleteBranch, force });
+    return asJsonText({ ok: true, adapter, id });
   },
 );
 

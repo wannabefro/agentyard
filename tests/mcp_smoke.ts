@@ -86,12 +86,18 @@ const tools = await send("tools/list", {});
 const toolList = (tools.result as { tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[] }).tools;
 const toolNames = toolList.map((t) => t.name).sort();
 const expectedTools = [
+  "create_session",
   "get_output",
   "get_session",
   "list_sessions",
+  "remove_session",
   "resolve_session",
+  "restart_session",
   "send_input",
   "send_then_wait",
+  "start_session",
+  "stop_session",
+  "wait_for_ready",
   "wait_idle",
 ];
 expect(
@@ -102,7 +108,7 @@ expect(
 const sendThenWait = toolList.find((t) => t.name === "send_then_wait");
 const props = sendThenWait?.inputSchema.properties ?? {};
 expect(
-  ["adapter", "id", "text", "changeTimeoutMs", "idleTimeoutMs", "idleWindowMs"].every(
+  ["adapter", "id", "text", "changeTimeoutMs", "idleTimeoutMs", "idleWindowMs", "readyTimeoutMs"].every(
     (k) => k in props,
   ),
   `send_then_wait input schema has expected keys: ${Object.keys(props).join(", ")}`,

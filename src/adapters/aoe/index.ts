@@ -1,6 +1,15 @@
-import type { Adapter, IdleWaitOptions, OutputSnapshot, SendResult } from "@/adapters/types.ts";
+import type {
+  Adapter,
+  CreateSessionOpts,
+  IdleWaitOptions,
+  OutputSnapshot,
+  ReadyWaitOptions,
+  ReadyWaitResult,
+  RemoveSessionOpts,
+  SendResult,
+} from "@/adapters/types.ts";
 import type { Session, SessionStatus } from "@/core/session.ts";
-import { runJson, runVoid } from "@/adapters/aoe/cli.ts";
+import { runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
 import {
   aoeCaptureSchema,
   aoeListSchema,
@@ -10,6 +19,17 @@ import {
 } from "@/adapters/aoe/schemas.ts";
 
 const ADAPTER_NAME = "aoe";
+
+// U+276F (heavy right-pointing angle quotation mark) — Claude Code prompt cursor.
+// U+203A (single right-pointing angle quotation mark) — Codex CLI prompt cursor.
+const KNOWN_PROMPT_CURSORS = ["❯", "›"] as const;
+
+const SESSION_ID_RE = /^\s*ID:\s+([a-f0-9]+)\s*$/m;
+
+function lastNonEmptyLine(content: string): string {
+  const lines = content.split("\n").map((l) => l.trimEnd()).filter((l) => l.length > 0);
+  return lines[lines.length - 1] ?? "";
+}
 
 function parseDate(value: string | undefined | null): Date | null {
   if (!value) return null;
@@ -136,5 +156,59 @@ export class AoeAdapter implements Adapter {
       }
     }
     return { settled: false, lastSnapshot };
+  }
+
+  async createSession(opts: CreateSessionOpts): Promise<{ id: string; title: string }> {
+    const argv = ["add", opts.path];
+    if (opts.title) argv.push("--title", opts.title);
+    if (opts.cmd) argv.push("--cmd", opts.cmd);
+    const { stdout } = await runRaw(argv);
+    const match = SESSION_ID_RE.exec(stdout);
+    if (!match || !match[1]) {
+      throw new Error(`aoe add did not return a session ID in stdout:\n${stdout}`);
+    }
+    return { id: match[1], title: opts.title ?? match[1] };
+  }
+
+  async startSession(id: string): Promise<void> {
+    await runVoid(["session", "start", id]);
+  }
+
+  async stopSession(id: string): Promise<void> {
+    await runVoid(["session", "stop", id]);
+  }
+
+  async restartSession(id: string): Promise<void> {
+    await runVoid(["session", "restart", id]);
+  }
+
+  async removeSession(id: string, opts: RemoveSessionOpts = {}): Promise<void> {
+    const argv = ["remove", id];
+    if (opts.deleteWorktree) argv.push("--delete-worktree");
+    if (opts.deleteBranch) argv.push("--delete-branch");
+    if (opts.force) argv.push("--force");
+    await runVoid(argv);
+  }
+
+  async waitForReady(id: string, opts: ReadyWaitOptions): Promise<ReadyWaitResult> {
+    const pollMs = opts.pollIntervalMs ?? 500;
+    const deadline = Date.now() + opts.timeoutMs;
+
+    while (Date.now() < deadline) {
+      const snap = await this.getOutput(id, 30);
+      const lastLine = lastNonEmptyLine(snap.content);
+      if (KNOWN_PROMPT_CURSORS.some((c) => lastLine.endsWith(c))) {
+        return { ready: true, lastLine };
+      }
+      await Bun.sleep(pollMs);
+    }
+
+    const snap = await this.getOutput(id, 30);
+    const lastLine = lastNonEmptyLine(snap.content);
+    return {
+      ready: false,
+      reason: `prompt cursor not detected within ${opts.timeoutMs}ms`,
+      lastLine,
+    };
   }
 }

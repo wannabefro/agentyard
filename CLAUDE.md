@@ -117,13 +117,16 @@ Tests live in `tests/` (not `src/`) and run directly with `bun run`.
 - Linter/formatter (Biome is the natural pick; not added yet).
 - Multi-adapter mode is supported by the registry but only `aoe` is implemented. Future adapters live in `src/adapters/<name>/`.
 
-## Readiness check: echo verification
+## Readiness checks
 
-`send_then_wait` uses echo verification — after `sendInput`, it waits for the (first 30 chars of, whitespace-normalized) sent text to appear in the pane more times than it appeared pre-send. This distinguishes "agent received and rendered the input" from "TUI is just doing its own boot rendering." Sends to a not-yet-receptive terminal now fail cleanly with `ok=false reason: "sent text did not appear in pane..."` instead of silently looking successful.
+`send_then_wait` has two readiness gates, layered:
 
-Short prompts (< 8 chars) fall back to plain change detection and are labeled accordingly in the result reason.
+1. **Pre-send prompt-cursor check** (`waitForReady`, optional per adapter). Polls `getOutput(id, 30)` until the last non-empty line ends with a known prompt cursor — `❯` for Claude Code, `›` for Codex CLI. Default 30s timeout, controlled by `readyTimeoutMs`. Skipped if the adapter doesn't implement `waitForReady`. The aoe adapter implements it.
+2. **Post-send echo verification.** Waits for the (first 30 chars of, whitespace-normalized) sent text to appear in the pane more times than it appeared pre-send. Distinguishes "agent received and rendered the input" from "TUI is just doing its own boot rendering." Short prompts (< 8 chars) fall back to plain change detection.
 
-Other readiness signals (prompt-cursor pre-send check, `aoe` status transitions) remain on the table for agents that don't echo verbatim — see [docs/research/agent-of-empires.md](docs/research/agent-of-empires.md).
+Combined effect: sends to a not-yet-booted TUI now fail with `agent not ready (prompt cursor not detected...)`; sends to a TUI that's at the prompt but somehow swallows the input fail with `sent text did not appear in pane...`. The two failure modes are reported distinctly so the host can branch.
+
+`aoe` status transitions (`idle → running → idle`) remain on the table as a third signal if needed — see [docs/research/agent-of-empires.md](docs/research/agent-of-empires.md).
 
 ## Related external context
 

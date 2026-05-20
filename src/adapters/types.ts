@@ -18,11 +18,23 @@ export type IdleWaitOptions = {
   pollIntervalMs?: number;
 };
 
+export type ReadyWaitOptions = {
+  timeoutMs: number;
+  pollIntervalMs?: number;
+};
+
+export type ReadyWaitResult = {
+  ready: boolean;
+  reason?: string;
+  lastLine: string;
+};
+
 export type SendThenWaitOptions = {
   changeTimeoutMs: number;
   idleTimeoutMs: number;
   idleWindowMs: number;
   pollIntervalMs?: number;
+  readyTimeoutMs?: number;
 };
 
 export type SendThenWaitResult = {
@@ -33,6 +45,18 @@ export type SendThenWaitResult = {
   after: OutputSnapshot;
   elapsedMs: number;
   reason?: string;
+};
+
+export type CreateSessionOpts = {
+  path: string;
+  title?: string;
+  cmd?: string;
+};
+
+export type RemoveSessionOpts = {
+  deleteWorktree?: boolean;
+  deleteBranch?: boolean;
+  force?: boolean;
 };
 
 export type Adapter = {
@@ -49,5 +73,12 @@ export type Adapter = {
     lastSnapshot: OutputSnapshot;
   }>;
 
+  createSession(opts: CreateSessionOpts): Promise<{ id: string; title: string }>;
+  startSession(id: string): Promise<void>;
+  stopSession(id: string): Promise<void>;
+  restartSession(id: string): Promise<void>;
+  removeSession(id: string, opts: RemoveSessionOpts): Promise<void>;
+
   sendThenWait?(id: string, text: string, opts: SendThenWaitOptions): Promise<SendThenWaitResult>;
+  waitForReady?(id: string, opts: ReadyWaitOptions): Promise<ReadyWaitResult>;
 };

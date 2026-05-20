@@ -52,6 +52,11 @@ function mockAdapter(opts: {
       }
       return { settled: false, lastSnapshot: { content: pane(), lines: 200 } };
     },
+    createSession: async () => { throw new Error("not implemented"); },
+    startSession: async () => {},
+    stopSession: async () => {},
+    restartSession: async () => {},
+    removeSession: async () => {},
   };
   return adapter;
 }
@@ -168,6 +173,11 @@ describe("sendThenWait with echo verification", () => {
       getOutput: async () => ({ content: "", lines: 0 }),
       sendInput: async () => ({ ok: true }),
       waitIdle: async () => ({ settled: true, lastSnapshot: { content: "", lines: 0 } }),
+      createSession: async () => { throw new Error("not implemented"); },
+      startSession: async () => {},
+      stopSession: async () => {},
+      restartSession: async () => {},
+      removeSession: async () => {},
       sendThenWait: async () => ({
         ok: true,
         changed: true,

@@ -97,6 +97,22 @@ export async function sendThenWait(
   const started = Date.now();
   const before = await adapter.getOutput(id);
 
+  if (adapter.waitForReady) {
+    const readyMs = opts.readyTimeoutMs ?? 30_000;
+    const ready = await adapter.waitForReady(id, { timeoutMs: readyMs, pollIntervalMs: pollMs });
+    if (!ready.ready) {
+      return {
+        ok: false,
+        changed: false,
+        settled: false,
+        before,
+        after: before,
+        elapsedMs: Date.now() - started,
+        reason: `agent not ready (prompt cursor not detected within ${readyMs}ms)`,
+      };
+    }
+  }
+
   const sendResult = await adapter.sendInput(id, text);
   if (!sendResult.ok) {
     return {
