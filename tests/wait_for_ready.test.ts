@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findRecentPromptCursorLine } from "@/adapters/aoe/index.ts";
+import { findRecentMenuCursorLine, findRecentPromptCursorLine } from "@/adapters/aoe/index.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import type {
   Adapter,
@@ -168,6 +168,35 @@ describe("waitForReady", () => {
       // we should not treat that as a ready prompt.
       const pane = "some output saying foo❯bar in the middle\nmore output";
       expect(findRecentPromptCursorLine(pane)).toBeNull();
+    });
+  });
+
+  describe("findRecentMenuCursorLine (companion menu detector)", () => {
+    test("returns the menu cursor line when a selector menu is showing", () => {
+      const pane = [
+        "Quick safety check: Is this a project you trust?",
+        "",
+        "❯ 1. Yes, I trust this folder",
+        "  2. No, exit",
+        "",
+        "Enter to confirm · Esc to cancel",
+      ].join("\n");
+      expect(findRecentMenuCursorLine(pane)).toBe("❯ 1. Yes, I trust this folder");
+    });
+
+    test("returns null when no menu cursor is present", () => {
+      const pane = "booting...\nsome output\n❯";
+      expect(findRecentMenuCursorLine(pane)).toBeNull();
+    });
+
+    test("returns null when the cursor is on numbered user input but no menu signals are present", () => {
+      // User typing "1. foo" at the real prompt — not a menu.
+      const pane = [
+        "────────────────────────────────────────",
+        "❯ 1. foo",
+        "────────────────────────────────────────",
+      ].join("\n");
+      expect(findRecentMenuCursorLine(pane)).toBeNull();
     });
   });
 

@@ -141,6 +141,28 @@ export function findRecentPromptCursorLine(content: string): string | null {
   return null;
 }
 
+// Companion scan for the rejected case: returns the most recent line that
+// looks like a selector menu cursor (`❯ N. <text>` with peer options or
+// nav-hint corroboration). Used only by waitForReady to produce a precise
+// timeout reason when no real prompt was found.
+export function findRecentMenuCursorLine(content: string): string | null {
+  const lines = content
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  const tail = lines.slice(-PROMPT_SCAN_WINDOW);
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const line = tail[i]!;
+    const trimmed = line.trimStart();
+    for (const cursor of KNOWN_PROMPT_CURSORS) {
+      if (trimmed === cursor || trimmed.startsWith(cursor + " ")) {
+        if (isMenuCursor(tail, i, trimmed, cursor)) return line;
+      }
+    }
+  }
+  return null;
+}
+
 function isMenuCursor(
   tail: string[],
   idx: number,
@@ -414,7 +436,18 @@ export class AoeAdapter implements Adapter {
 
     // For the timeout reason we surface the actual trailing line so the
     // caller can see what the agent was rendering instead of a prompt.
+    // If we detected a menu cursor (rejected from the ready check) the
+    // caller gets a more actionable reason — dismiss the menu before
+    // sending text.
     const snap = await this.getOutput(id, 30);
+    const menuLine = findRecentMenuCursorLine(snap.content);
+    if (menuLine !== null) {
+      return {
+        ready: false,
+        reason: `agent showing a selector menu; dismiss it (e.g. send_input("") for default, or send_input("<digit>") for a specific option) before sending text`,
+        lastLine: menuLine,
+      };
+    }
     const lastLine = lastNonEmptyLine(snap.content);
     return {
       ready: false,
