@@ -13,37 +13,51 @@ Adapters in this repo:
 
 ## Install
 
-Requires Bun >= 1.3, macOS or Linux. The `aoe` adapter additionally requires the [`aoe` CLI](https://www.agent-of-empires.com) (1.7+). The `claude-code` adapter has no runtime dependencies — it reads transcript files directly.
+macOS or Linux. The `aoe` adapter additionally requires the [`aoe` CLI](https://www.agent-of-empires.com) (1.7+). The `claude-code` adapter has no runtime dependencies — it reads transcript files directly.
 
-Install globally from npm:
+Pick one path:
+
+### A. No Bun on the machine — single binary
+
+GitHub Releases ships standalone executables for macOS and Linux (arm64 and x64). The Bun runtime is embedded; nothing else to install.
 
 ```bash
-bun add -g agentyard
+# macOS Apple Silicon — pick the matching asset for your platform
+curl -L https://github.com/wannabefro/agentyard/releases/latest/download/agentyard-darwin-arm64 -o /usr/local/bin/agentyard
+chmod +x /usr/local/bin/agentyard
 ```
 
-Or run from a clone:
+Other platforms: replace `darwin-arm64` with `darwin-x64`, `linux-arm64`, or `linux-x64`.
+
+### B. Bun installed — zero-install via bunx
+
+```bash
+claude mcp add agentyard -s user -- bunx agentyard
+```
+
+Pin a version with `bunx agentyard@0.1.3` if you don't want the host to silently pick up new releases.
+
+### C. Local checkout (for active development)
 
 ```bash
 git clone https://github.com/wannabefro/agentyard.git
 cd agentyard
 bun install
+bun link
+bun link agentyard
 ```
+
+`bun link` symlinks your working tree as the global `agentyard` binary so edits to `src/` go live without republishing.
 
 ## Register as MCP server in Claude Code
 
-If installed globally:
+After installing by any of the above paths:
 
 ```bash
 claude mcp add agentyard -s user -- agentyard
 ```
 
-If running from a clone:
-
-```bash
-claude mcp add agentyard -s user -- bun /absolute/path/to/agentyard/src/index.ts
-```
-
-`-s user` registers the server in the user-scoped Claude Code config, making `agentyard` available across every Claude Code session on the machine.
+`-s user` registers the server in the user-scoped Claude Code config, making `agentyard` available across every Claude Code session on the machine. Restart Claude Code after `claude mcp add` so the host loads the new server.
 
 ## Available MCP tools
 

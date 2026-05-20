@@ -1,0 +1,83 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.4)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build Linux binaries
+        run: bash scripts/build-binaries.sh linux-arm64 linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentyard-linux
+          path: dist/agentyard-linux-*
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build macOS binaries (ad-hoc signed)
+        run: bash scripts/build-binaries.sh darwin-arm64 darwin-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentyard-macos
+          path: dist/agentyard-darwin-*
+
+  release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+      - name: Compute checksums
+        run: |
+          cd dist
+          shasum -a 256 agentyard-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Create release if absent; if it already exists (e.g. manually
+          # created), upload binaries into it with --clobber.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/agentyard-* dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              dist/agentyard-* dist/SHA256SUMS
+          fi
