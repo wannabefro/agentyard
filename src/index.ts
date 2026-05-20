@@ -172,7 +172,14 @@ server.registerTool(
   {
     title: "Send input to session",
     description:
-      "Send a message to a running agent session. The agent will receive it as if the user typed it.",
+      "Fire-and-forget send: transmits text to the underlying tmux pane. " +
+      "Returns ok:true if the CLI accepted the send — NOT a guarantee the " +
+      "agent received and processed it. Against a session aoe classifies " +
+      "as `error` or `stopped`, the send may trigger an auto-revive and " +
+      "the keystrokes can race the agent's readiness window, leaving the " +
+      "input staged but not submitted. For guaranteed delivery use " +
+      "send_then_wait, which polls the pane for evidence the agent saw " +
+      "the input.",
     inputSchema: {
       adapter: z.string(),
       id: z.string(),
