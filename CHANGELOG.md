@@ -10,6 +10,25 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Concurrent aoe lifecycle calls (`createSession`, `startSession`,
+  `stopSession`, `restartSession`, `removeSession`) now serialize
+  adapter-wide.** Phase-3 dogfood observed `Promise.all([setupA, setupB])`
+  failing exit 1 — aoe's sessions.json + tmux state collides under
+  concurrent mutation. The previous workaround was to serialize at the
+  call site; the adapter now does it internally via a single promise-chain
+  lock, so MCP hosts can safely `Promise.all` lifecycle calls across
+  distinct session ids. Read paths (list/show/capture/send) remain
+  parallel.
+
+### Changed
+
+- **`send_input.text` now accepts empty strings** (`min(0)` instead of
+  `min(1)`). Lets callers send a bare Enter to confirm default selections
+  in TUI prompts (e.g. Claude Code's first-run trust prompt). Non-empty
+  text still works unchanged.
+
 ## [0.1.5] - 2026-05-20
 
 ### Fixed

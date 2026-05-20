@@ -130,7 +130,10 @@ server.registerTool(
     inputSchema: {
       adapter: z.string(),
       id: z.string(),
-      text: z.string().min(1),
+      text: z.string().min(0).describe(
+        "Text to send. Empty string sends a bare Enter, useful for confirming " +
+        "default selections in TUI prompts (e.g. Claude Code's trust prompt).",
+      ),
     },
   },
   async ({ adapter, id, text }) => {

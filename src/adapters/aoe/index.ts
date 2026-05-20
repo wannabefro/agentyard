@@ -20,6 +20,22 @@ import {
 
 const ADAPTER_NAME = "aoe";
 
+// aoe's lifecycle commands (add / session start / session stop / session restart
+// / remove) all mutate shared state — sessions.json and tmux session naming.
+// Phase-3 dogfood (2026-05-20) observed `session start` failing with exit 1
+// when invoked for two distinct session ids concurrently. Serialize all
+// lifecycle calls adapter-wide. Read paths (list, show, capture, send) are
+// safe to run in parallel and stay unlocked.
+let aoeLifecycleQueue: Promise<unknown> = Promise.resolve();
+
+function withAoeLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
+  // Chain regardless of previous outcome so one failed call doesn't poison
+  // the queue for everything behind it.
+  const next = aoeLifecycleQueue.then(fn, fn);
+  aoeLifecycleQueue = next;
+  return next;
+}
+
 // U+276F (heavy right-pointing angle quotation mark) — Claude Code prompt cursor.
 // U+203A (single right-pointing angle quotation mark) — Codex CLI prompt cursor.
 const KNOWN_PROMPT_CURSORS = ["❯", "›"] as const;
@@ -250,35 +266,39 @@ export class AoeAdapter implements Adapter {
   }
 
   async createSession(opts: CreateSessionOpts): Promise<{ id: string; title: string }> {
-    const argv = ["add", opts.path];
-    if (opts.title) argv.push("--title", opts.title);
-    if (opts.cmd) argv.push("--cmd", opts.cmd);
-    const { stdout } = await runRaw(argv);
-    const match = SESSION_ID_RE.exec(stdout);
-    if (!match || !match[1]) {
-      throw new Error(`aoe add did not return a session ID in stdout:\n${stdout}`);
-    }
-    return { id: match[1], title: opts.title ?? match[1] };
+    return withAoeLifecycleLock(async () => {
+      const argv = ["add", opts.path];
+      if (opts.title) argv.push("--title", opts.title);
+      if (opts.cmd) argv.push("--cmd", opts.cmd);
+      const { stdout } = await runRaw(argv);
+      const match = SESSION_ID_RE.exec(stdout);
+      if (!match || !match[1]) {
+        throw new Error(`aoe add did not return a session ID in stdout:\n${stdout}`);
+      }
+      return { id: match[1], title: opts.title ?? match[1] };
+    });
   }
 
   async startSession(id: string): Promise<void> {
-    await runVoid(["session", "start", id]);
+    await withAoeLifecycleLock(() => runVoid(["session", "start", id]));
   }
 
   async stopSession(id: string): Promise<void> {
-    await runVoid(["session", "stop", id]);
+    await withAoeLifecycleLock(() => runVoid(["session", "stop", id]));
   }
 
   async restartSession(id: string): Promise<void> {
-    await runVoid(["session", "restart", id]);
+    await withAoeLifecycleLock(() => runVoid(["session", "restart", id]));
   }
 
   async removeSession(id: string, opts: RemoveSessionOpts = {}): Promise<void> {
-    const argv = ["remove", id];
-    if (opts.deleteWorktree) argv.push("--delete-worktree");
-    if (opts.deleteBranch) argv.push("--delete-branch");
-    if (opts.force) argv.push("--force");
-    await runVoid(argv);
+    await withAoeLifecycleLock(() => {
+      const argv = ["remove", id];
+      if (opts.deleteWorktree) argv.push("--delete-worktree");
+      if (opts.deleteBranch) argv.push("--delete-branch");
+      if (opts.force) argv.push("--force");
+      return runVoid(argv);
+    });
   }
 
   async waitForReady(id: string, opts: ReadyWaitOptions): Promise<ReadyWaitResult> {
