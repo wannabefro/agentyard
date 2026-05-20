@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
 // Spawn the agentyard MCP server, drive it over stdio with raw JSON-RPC frames,
-// and assert the two key flows: list_sessions returns aoe sessions, and
+// and assert the two key flows: list_sessions returns sessions, and
 // resolve_session("fender evals") puts fender-evals on top.
+//
+// Uses AGENTYARD_MOCK=1 so the assertions are deterministic on machines with
+// no aoe CLI or local Claude Code transcripts (e.g. GitHub runners).
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_CMD = ["bun", "run", "src/index.ts"];
+const SERVER_ENV = { ...process.env, AGENTYARD_MOCK: "1" };
 
 type JsonRpcMessage = {
   jsonrpc: "2.0";
@@ -17,6 +21,7 @@ type JsonRpcMessage = {
 
 const proc = Bun.spawn(SERVER_CMD, {
   cwd: import.meta.dir + "/..",
+  env: SERVER_ENV,
   stdin: "pipe",
   stdout: "pipe",
   stderr: "inherit",

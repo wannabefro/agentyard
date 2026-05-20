@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { AoeAdapter } from "@/adapters/aoe/index.ts";
 import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
+import { MockAdapter } from "@/adapters/mock/index.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
 import { resolve } from "@/resolver/index.ts";
@@ -13,6 +14,9 @@ import pkg from "../package.json" with { type: "json" };
 const registry = new AdapterRegistry();
 registry.register(new AoeAdapter());
 registry.register(new ClaudeCodeAdapter());
+if (process.env.AGENTYARD_MOCK === "1") {
+  registry.register(new MockAdapter());
+}
 
 const server = new McpServer(
   { name: "agentyard", version: pkg.version },
