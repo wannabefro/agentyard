@@ -61,6 +61,13 @@ export type SendThenWaitResult = {
   after: OutputSnapshot;
   elapsedMs: number;
   reason?: string;
+  // Non-fatal advisories the host should surface to the user — e.g. the
+  // session's recorded workdir was missing so the spawn fell back to a
+  // different cwd, or a normalisation step had to skip a malformed record.
+  // Empty / undefined when there's nothing to say. Distinct from `reason`
+  // (which is for failure explanations) so a successful call can still
+  // carry warnings.
+  warnings?: string[];
 };
 
 export type CreateSessionOpts = {

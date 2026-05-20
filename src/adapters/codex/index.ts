@@ -142,7 +142,11 @@ export class CodexAdapter implements Adapter {
     // "ENOENT posix_spawn '<binary>'" when cwd doesn't exist — see
     // src/core/spawn_env.ts:ensureSpawnCwd for the gory details.
     const cwdResolved = await ensureSpawnCwd(session.workdir, "fallback");
-    if (cwdResolved.warning) console.error(`[codex] ${cwdResolved.warning}`);
+    const warnings: string[] = [];
+    if (cwdResolved.warning) {
+      console.error(`[codex] ${cwdResolved.warning}`);
+      warnings.push(cwdResolved.warning);
+    }
     const proc = Bun.spawn([findBinary("codex"), ...args], {
       cwd: cwdResolved.cwd,
       env: spawnEnv(),
@@ -158,9 +162,14 @@ export class CodexAdapter implements Adapter {
     const after = await this.getOutput(id, 200);
     const changed = after.content !== before.content;
 
+    const withWarnings = (
+      r: Omit<SendThenWaitResult, "warnings">,
+    ): SendThenWaitResult =>
+      warnings.length > 0 ? { ...r, warnings } : r;
+
     if (exitCode !== 0) {
       await safeUnlink(lastMsgFile);
-      return {
+      return withWarnings({
         ok: false,
         changed,
         settled: true,
@@ -168,7 +177,7 @@ export class CodexAdapter implements Adapter {
         after,
         elapsedMs: Date.now() - started,
         reason: `codex exec resume exit ${exitCode}: ${stderrText.trim() || stdoutText.trim().slice(0, 240)}`,
-      };
+      });
     }
 
     const events = parseEventStream(stdoutText);
@@ -183,7 +192,7 @@ export class CodexAdapter implements Adapter {
     await safeUnlink(lastMsgFile);
 
     if (!turnCompleted) {
-      return {
+      return withWarnings({
         ok: false,
         changed,
         settled: true,
@@ -191,14 +200,14 @@ export class CodexAdapter implements Adapter {
         after,
         elapsedMs: Date.now() - started,
         reason: `codex exec resume succeeded but no turn.completed event was emitted (got ${events.length} events): ${stdoutText.slice(0, 240)}`,
-      };
+      });
     }
 
     if (finalText === null) {
       // The turn completed but produced no final agent message — surface it
       // distinctly. Could be an interrupted run, a session that hit a
       // tool-approval gate, or a model that emitted only commentary phases.
-      return {
+      return withWarnings({
         ok: false,
         changed,
         settled: true,
@@ -206,17 +215,17 @@ export class CodexAdapter implements Adapter {
         after,
         elapsedMs: Date.now() - started,
         reason: `codex turn completed but emitted no final agent message`,
-      };
+      });
     }
 
-    return {
+    return withWarnings({
       ok: true,
       changed,
       settled: true,
       before,
       after,
       elapsedMs: Date.now() - started,
-    };
+    });
   }
 }
 

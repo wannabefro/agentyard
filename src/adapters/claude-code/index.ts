@@ -124,7 +124,11 @@ export class ClaudeCodeAdapter implements Adapter {
     // empty directory at that path is sufficient. ensureSpawnCwd with
     // "create" policy handles both the existing-dir and recreate cases.
     const cwdResolved = await ensureSpawnCwd(session.workdir, "create");
-    if (cwdResolved.warning) console.error(`[claude-code] ${cwdResolved.warning}`);
+    const warnings: string[] = [];
+    if (cwdResolved.warning) {
+      console.error(`[claude-code] ${cwdResolved.warning}`);
+      warnings.push(cwdResolved.warning);
+    }
     const proc = Bun.spawn(
       [findBinary("claude"), "--resume", id, "--print", "--output-format", "json", text],
       {
@@ -140,9 +144,14 @@ export class ClaudeCodeAdapter implements Adapter {
       proc.exited,
     ]);
 
+    const withWarnings = (
+      r: Omit<SendThenWaitResult, "warnings">,
+    ): SendThenWaitResult =>
+      warnings.length > 0 ? { ...r, warnings } : r;
+
     if (exitCode !== 0) {
       const after = await this.getOutput(id, 200);
-      return {
+      return withWarnings({
         ok: false,
         changed: after.content !== before.content,
         settled: true,
@@ -150,7 +159,7 @@ export class ClaudeCodeAdapter implements Adapter {
         after,
         elapsedMs: Date.now() - started,
         reason: `claude --resume exit ${exitCode}: ${stderrText.trim() || stdoutText.trim().slice(0, 240)}`,
-      };
+      });
     }
 
     // The CLI emits a single JSON object on stdout. Tolerate stray
@@ -161,7 +170,7 @@ export class ClaudeCodeAdapter implements Adapter {
     const changed = after.content !== before.content;
 
     if (!parsed) {
-      return {
+      return withWarnings({
         ok: false,
         changed,
         settled: true,
@@ -169,10 +178,10 @@ export class ClaudeCodeAdapter implements Adapter {
         after,
         elapsedMs: Date.now() - started,
         reason: `claude --resume succeeded but stdout did not contain a parseable JSON result: ${stdoutText.slice(0, 240)}`,
-      };
+      });
     }
     if (parsed.is_error) {
-      return {
+      return withWarnings({
         ok: false,
         changed,
         settled: true,
@@ -182,17 +191,17 @@ export class ClaudeCodeAdapter implements Adapter {
         reason: parsed.api_error_status
           ? `claude returned api_error_status=${parsed.api_error_status}`
           : `claude --print reported is_error=true (subtype=${parsed.subtype ?? "unknown"})`,
-      };
+      });
     }
 
-    return {
+    return withWarnings({
       ok: true,
       changed,
       settled: true,
       before,
       after,
       elapsedMs: Date.now() - started,
-    };
+    });
   }
 }
 
