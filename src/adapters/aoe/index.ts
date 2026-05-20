@@ -10,6 +10,7 @@ import type {
   SendResult,
 } from "@/adapters/types.ts";
 import type { Session, SessionStatus } from "@/core/session.ts";
+import { spawnEnv } from "@/core/spawn_env.ts";
 import { AoeCliError, runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
 import {
   aoeCaptureSchema,
@@ -44,6 +45,7 @@ function withAoeLifecycleLock<T>(fn: () => Promise<T>): Promise<T> {
 async function findAoeTmuxSession(id: string): Promise<string | null> {
   const idPrefix = id.slice(0, 8);
   const proc = Bun.spawn(["tmux", "ls", "-F", "#{session_name}"], {
+    env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -70,6 +72,7 @@ async function sendBareEnter(id: string): Promise<SendResult> {
   // tmux versions; C-m is the lower-level form, less likely to collide
   // with a literal "Enter" string.
   const proc = Bun.spawn(["tmux", "send-keys", "-t", target, "C-m"], {
+    env: spawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
   });

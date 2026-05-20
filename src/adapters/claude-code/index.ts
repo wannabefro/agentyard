@@ -9,6 +9,7 @@ import type {
   SendThenWaitResult,
 } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
+import { spawnEnv } from "@/core/spawn_env.ts";
 import {
   discoverTranscripts,
   extractMessages,
@@ -120,6 +121,7 @@ export class ClaudeCodeAdapter implements Adapter {
       ["claude", "--resume", id, "--print", "--output-format", "json", text],
       {
         cwd: session.workdir,
+        env: spawnEnv(),
         stdout: "pipe",
         stderr: "pipe",
       },

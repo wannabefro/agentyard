@@ -10,6 +10,7 @@ import type {
   SendThenWaitResult,
 } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
+import { spawnEnv } from "@/core/spawn_env.ts";
 import {
   discoverRollouts,
   extractMessages,
@@ -135,6 +136,7 @@ export class CodexAdapter implements Adapter {
     ];
     const proc = Bun.spawn(["codex", ...args], {
       cwd: session.workdir || process.cwd(),
+      env: spawnEnv(),
       stdout: "pipe",
       stderr: "pipe",
     });
