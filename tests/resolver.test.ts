@@ -72,15 +72,25 @@ describe("resolve", () => {
     expect(candidates[0]!.session.id).toBe("cf");
   });
 
-  test("filter-only query returns sessions with score 0 but excludes non-matching", () => {
+  test("filter-only query enumerates filter matches; non-matching is excluded", () => {
+    // The query is pure filter ("running" is a known status). No content
+    // tokens, so the only signal is the filter itself plus any recency
+    // bonus. Both running sessions appear; the idle one does not. Scores are
+    // non-zero now because status=running grants a recency bonus, but no
+    // content matchers contributed (no reason mentions "title", "summary",
+    // "branch", "repo", or "fuzzy").
     const running = makeSession({ id: "r1", title: "abc", status: "running" });
     const running2 = makeSession({ id: "r2", title: "xyz", status: "running" });
     const idle = makeSession({ id: "i1", title: "abc", status: "idle" });
     const candidates = resolve("running", [running, running2, idle]);
     const ids = candidates.map((c) => c.session.id).sort();
     expect(ids).toEqual(["r1", "r2"]);
+    const contentReasonKeywords = ["title", "summary", "branch", "repo", "fuzzy"];
     for (const c of candidates) {
-      expect(c.score).toBe(0);
+      const hasContentReason = c.reasons.some((r) =>
+        contentReasonKeywords.some((k) => r.includes(k)),
+      );
+      expect(hasContentReason).toBe(false);
     }
   });
 
@@ -149,6 +159,54 @@ describe("resolve", () => {
     const candidates = resolve("failing go tests", [partialTitle, codenamed]);
     expect(candidates[0]!.session.id).toBe("404-mt");
     expect(candidates[0]!.reasons.some((r) => r.includes("summary"))).toBe(true);
+  });
+
+  test("recency: running status outranks idle when both match the same title", () => {
+    // Two sessions, identical metadata, different statuses. The running one
+    // is what the user almost certainly means.
+    const running = makeSession({ id: "r", title: "auth-fix", status: "running" });
+    const idle = makeSession({ id: "i", title: "auth-fix", status: "idle" });
+    const candidates = resolve("auth-fix", [idle, running]);
+    expect(candidates[0]!.session.id).toBe("r");
+    expect(candidates[0]!.reasons.some((r) => r.includes("running now"))).toBe(true);
+  });
+
+  test("recency: more recent lastActivityAt outranks older when scores are equal", () => {
+    const recent = makeSession({
+      id: "new",
+      title: "thing",
+      lastActivityAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min ago
+    });
+    const stale = makeSession({
+      id: "old",
+      title: "thing",
+      lastActivityAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days
+    });
+    const candidates = resolve("thing", [stale, recent]);
+    expect(candidates[0]!.session.id).toBe("new");
+    expect(candidates[0]!.reasons.some((r) => r.includes("active in last hour"))).toBe(
+      true,
+    );
+  });
+
+  test("recency bonus does not promote a zero-match session above a real match", () => {
+    // Capped recency bonus (~0.9) is intentionally smaller than a single
+    // strong matcher (substring title weight = 3, etc.) so it can break ties
+    // but not invent matches.
+    const recentNoMatch = makeSession({
+      id: "fresh-but-irrelevant",
+      title: "completely-unrelated",
+      status: "running",
+      lastActivityAt: new Date(),
+    });
+    const oldButMatching = makeSession({
+      id: "stale-but-matching",
+      title: "fender-evals",
+      status: "stopped",
+      lastActivityAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+    });
+    const candidates = resolve("fender", [recentNoMatch, oldButMatching]);
+    expect(candidates[0]!.session.id).toBe("stale-but-matching");
   });
 
   test("summary matching is skipped when the field is null", () => {

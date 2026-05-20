@@ -12,6 +12,14 @@ or exact version if you depend on this externally.
 
 ### Added
 
+- Resolver: recency weighting. Status-based bonus (`running` +0.5,
+  `waiting` +0.3, `idle` +0.1) works for every adapter without needing
+  timestamps. When `lastActivityAt` is populated (claude-code adapter),
+  a continuous time-decay bonus stacks on top (`< 1h` +0.4, `< 24h`
+  +0.2, `< 7d` +0.1). Combined max ~0.9 — small enough that recency
+  breaks ties and lifts close-call candidates without inventing matches
+  from nothing. Reasons surface the bonus ("idle now", "active 6h ago")
+  so ranking is debuggable.
 - `Session.summary` — optional short text snapshot of what each session is
   working on. Lets the resolver match queries against pane content (aoe) or
   the most recent user prompt (claude-code), not just title / branch

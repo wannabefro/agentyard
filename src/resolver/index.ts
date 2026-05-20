@@ -95,10 +95,47 @@ function substringSummaryMatch(restTokens: string[], s: Session): number {
   return hits / restTokens.length;
 }
 
+// Status tier as a recency proxy. Works for every adapter without needing
+// timestamps (which aoe doesn't expose via CLI). The user's intuition: a
+// session whose agent is actively running RIGHT NOW is what they probably
+// mean when their query is ambiguous between several matches.
+const STATUS_RECENCY_BONUS: Record<string, number> = {
+  running: 0.5,
+  waiting: 0.3,
+  idle: 0.1,
+};
+
+function statusBonus(s: Session): { bonus: number; label: string | null } {
+  const bonus = STATUS_RECENCY_BONUS[s.status] ?? 0;
+  if (bonus === 0) return { bonus: 0, label: null };
+  return { bonus, label: `${s.status} now` };
+}
+
+// Continuous time decay applied when the adapter populated lastActivityAt.
+// Buckets are coarse so the reason string is readable; the underlying values
+// could be a smooth exp decay if we ever want finer ordering — but stepped
+// keeps "why did this rank higher" debuggable.
+function timeBonus(
+  s: Session,
+  now: number,
+): { bonus: number; label: string | null } {
+  if (!s.lastActivityAt) return { bonus: 0, label: null };
+  const ageMs = now - s.lastActivityAt.getTime();
+  if (ageMs < 0) return { bonus: 0, label: null };
+  const ageH = ageMs / 3_600_000;
+  if (ageH < 1) return { bonus: 0.4, label: "active in last hour" };
+  if (ageH < 24) return { bonus: 0.2, label: `active ${Math.round(ageH)}h ago` };
+  if (ageH < 168) {
+    return { bonus: 0.1, label: `active ${Math.round(ageH / 24)}d ago` };
+  }
+  return { bonus: 0, label: null };
+}
+
 export function resolve(query: string, sessions: Session[]): Candidate[] {
   const qTokens = tokens(query);
   const { tools, statuses, rest } = extractFilters(qTokens);
   const restQuery = rest.join(" ");
+  const now = Date.now();
 
   const filtered = sessions.filter((s) => {
     if (tools.size > 0 && !tools.has(s.tool)) return false;
@@ -197,7 +234,23 @@ export function resolve(query: string, sessions: Session[]): Candidate[] {
     if (tools.has(s.tool)) reasons.push(`tool filter matched (${s.tool})`);
     if (statuses.has(s.status)) reasons.push(`status filter matched (${s.status})`);
 
-    if (score > 0 || tools.size > 0 || statuses.size > 0) {
+    // Recency bonuses apply only when there's already some signal — otherwise
+    // a fresh-but-irrelevant session would float to the top of an unrelated
+    // query. Filter-only queries (tools.size > 0 || statuses.size > 0) are an
+    // exception: the user is explicitly enumerating, so recency should reorder
+    // those.
+    const isCandidate = score > 0 || tools.size > 0 || statuses.size > 0;
+    if (isCandidate) {
+      const { bonus: sb, label: sl } = statusBonus(s);
+      if (sb > 0) {
+        score += sb;
+        reasons.push(sl!);
+      }
+      const { bonus: tb, label: tl } = timeBonus(s, now);
+      if (tb > 0) {
+        score += tb;
+        reasons.push(tl!);
+      }
       candidates.push({ session: s, score, reasons });
     }
   }
