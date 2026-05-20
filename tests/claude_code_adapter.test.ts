@@ -77,7 +77,7 @@ describe("ClaudeCodeAdapter", () => {
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "pepper-claude-code-test-"));
+    root = mkdtempSync(join(tmpdir(), "agentyard-claude-code-test-"));
   });
 
   afterEach(() => {
@@ -96,7 +96,7 @@ describe("ClaudeCodeAdapter", () => {
         sessionId,
         cwd: "/Users/sam.mctaggart/Dev/pepper",
         branch: "main",
-        title: "Hacking on pepper",
+        title: "Hacking on agentyard",
       }),
     );
 
@@ -107,7 +107,7 @@ describe("ClaudeCodeAdapter", () => {
     expect(sessions[0]!).toMatchObject({
       adapter: "claude-code",
       id: sessionId,
-      title: "Hacking on pepper",
+      title: "Hacking on agentyard",
       tool: "claude",
       workdir: "/Users/sam.mctaggart/Dev/pepper",
       branch: "main",
@@ -204,7 +204,7 @@ describe("ClaudeCodeAdapter", () => {
       title: "Tolerant parse",
     });
     const unknown = makeTranscriptLine({
-      type: "future-record-type-pepper-doesnt-know",
+      type: "future-record-type-agentyard-doesnt-know",
       sessionId,
       payload: { foo: "bar" },
     });

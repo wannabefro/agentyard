@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project intent
 
-`pepper` is an **orchestrator for AI coding agents**. The end-state interface is conversational — the user says things like *"Can we check the status of the fender evals"* and the orchestrator resolves which underlying agent session that refers to, dispatches the interaction, and returns the result.
+`agentyard` is an **orchestrator for AI coding agents**. The end-state interface is conversational — the user says things like *"Can we check the status of the fender evals"* and the orchestrator resolves which underlying agent session that refers to, dispatches the interaction, and returns the result.
 
 ### Hard constraints
 
@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Stack decisions
 
 - **Language: TypeScript on Bun.** Chosen because the workload is concurrency-heavy (many independent pollers, idle-detectors, and loop drivers running at once — the canonical Node use case), static types pay rent on adapter schema normalization (each adapter has to flatten multiple shapes — see the `aoe` research notes), and the MCP TypeScript SDK is the reference implementation. Bun gives clean subprocess handling, native TS without a build step, and single-binary builds if needed later. Python was the initial pick but lost on the concurrency-model fit and the opt-in-types tax.
-- **Frontend: MCP server.** Conversational surface is provided by the MCP host (Claude Code or another). `pepper` exposes orchestrator capabilities as MCP tools. No bespoke CLI or HTTP frontend unless something forces one.
+- **Frontend: MCP server.** Conversational surface is provided by the MCP host (Claude Code or another). `agentyard` exposes orchestrator capabilities as MCP tools. No bespoke CLI or HTTP frontend unless something forces one.
 
 ## Architecture
 
@@ -130,4 +130,4 @@ Combined effect: sends to a not-yet-booted TUI now fail with `agent not ready (p
 
 ## Related external context
 
-The user's global `~/.claude/CLAUDE.md` and `~/.claude/rules/` already cover general workflow, verification, commit, and delegation rules. This file is for `pepper`-specific guidance only.
+The user's global `~/.claude/CLAUDE.md` and `~/.claude/rules/` already cover general workflow, verification, commit, and delegation rules. This file is for `agentyard`-specific guidance only.

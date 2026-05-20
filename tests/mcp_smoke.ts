@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Spawn the pepper MCP server, drive it over stdio with raw JSON-RPC frames,
+// Spawn the agentyard MCP server, drive it over stdio with raw JSON-RPC frames,
 // and assert the two key flows: list_sessions returns aoe sessions, and
 // resolve_session("fender evals") puts fender-evals on top.
 
@@ -76,9 +76,9 @@ function expect(cond: boolean, label: string): void {
 const init = await send("initialize", {
   protocolVersion: PROTOCOL_VERSION,
   capabilities: {},
-  clientInfo: { name: "pepper-smoke", version: "0.0.0" },
+  clientInfo: { name: "agentyard-smoke", version: "0.0.0" },
 });
-expect((init.result as { serverInfo: { name: string } }).serverInfo.name === "pepper", "initialize -> serverInfo.name == 'pepper'");
+expect((init.result as { serverInfo: { name: string } }).serverInfo.name === "agentyard", "initialize -> serverInfo.name == 'agentyard'");
 
 await notify("notifications/initialized");
 

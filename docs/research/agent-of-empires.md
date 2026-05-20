@@ -228,7 +228,7 @@ Found during live dogfood (2026-05-19):
 - `aoe session show <id> --json` reports `status: "idle"` within seconds of `aoe session start`.
 - `aoe send <id> "..."` succeeds at the subprocess level.
 - The Claude TUI may still be booting (welcome animation, or a "trust this folder?" confirmation). The send never reaches the agent — post-send pane shows `0% ctx | $0.000`.
-- pepper's first `send_then_wait` saw TUI rendering as "change," then "settle," and reported `ok=true changed=true settled=true`. False success.
+- agentyard's first `send_then_wait` saw TUI rendering as "change," then "settle," and reported `ok=true changed=true settled=true`. False success.
 
 **Fix shipped — echo verification.** After `sendInput`, `send_then_wait` now waits for the first 30 chars of the (normalized) sent text to appear in the pane more times than they appeared pre-send. Implementation in `src/core/loop.ts` (`waitForEcho`). For text shorter than 8 chars (`y`, `1`, `no`), falls back to plain change detection and labels the result accordingly.
 

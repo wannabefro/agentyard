@@ -14,10 +14,10 @@ registry.register(new AoeAdapter());
 registry.register(new ClaudeCodeAdapter());
 
 const server = new McpServer(
-  { name: "pepper", version: "0.0.1" },
+  { name: "agentyard", version: "0.1.0" },
   {
     instructions:
-      "pepper orchestrates AI coding agent sessions across adapters. " +
+      "agentyard orchestrates AI coding agent sessions across adapters. " +
       "Use resolve_session to map a natural-language reference to a concrete session, " +
       "then call get_output, send_input, or wait_idle against the chosen (adapter, id) pair.",
   },
@@ -323,7 +323,7 @@ server.registerTool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`pepper MCP server up; adapters: ${registry.list().join(", ")}`);
+console.error(`agentyard MCP server up; adapters: ${registry.list().join(", ")}`);
 
 process.on("SIGINT", async () => {
   await server.close();

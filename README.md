@@ -1,10 +1,10 @@
-# pepper
+# agentyard
 
 > **Pre-1.0 — interfaces are not stable.** Adapter and tool shapes have shifted several times during development and may shift again before the first tagged release. Pin a commit if you depend on this externally.
 
-## What pepper is
+## What agentyard is
 
-`pepper` is an adapter-based MCP orchestrator for AI coding agents. It exposes a conversational interface through an MCP host (such as Claude Code): the user asks about "the fender evals" or "the codex session fixing auth", and `pepper` resolves the reference, dispatches the interaction, and returns the result. The core stays agent-system-agnostic so new platforms land as new adapters, not core changes.
+`agentyard` is an adapter-based MCP orchestrator for AI coding agents. It exposes a conversational interface through an MCP host (such as Claude Code): the user asks about "the fender evals" or "the codex session fixing auth", and `agentyard` resolves the reference, dispatches the interaction, and returns the result. The core stays agent-system-agnostic so new platforms land as new adapters, not core changes.
 
 Adapters in this repo:
 
@@ -22,10 +22,10 @@ bun install
 ## Register as MCP server in Claude Code
 
 ```bash
-claude mcp add pepper -s user -- bun /absolute/path/to/pepper/src/index.ts
+claude mcp add agentyard -s user -- bun /absolute/path/to/agentyard/src/index.ts
 ```
 
-`-s user` registers the server in the user-scoped Claude Code config, making `pepper` available across every Claude Code session on the machine. Replace `/absolute/path/to/pepper` with the absolute path to your checkout.
+`-s user` registers the server in the user-scoped Claude Code config, making `agentyard` available across every Claude Code session on the machine. Replace `/absolute/path/to/agentyard` with the absolute path to your checkout.
 
 ## Available MCP tools
 
