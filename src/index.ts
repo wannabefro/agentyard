@@ -247,6 +247,7 @@ server.registerTool(
     const a = registry.get(adapter);
     if (!a.createSession) return notImplemented(adapter, "createSession");
     const result = await a.createSession({ path, title, cmd });
+    registry.invalidate();
     return asJsonText({ adapter, ...result });
   },
 );
@@ -265,6 +266,7 @@ server.registerTool(
     const a = registry.get(adapter);
     if (!a.startSession) return notImplemented(adapter, "startSession");
     await a.startSession(id);
+    registry.invalidate();
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -283,6 +285,7 @@ server.registerTool(
     const a = registry.get(adapter);
     if (!a.stopSession) return notImplemented(adapter, "stopSession");
     await a.stopSession(id);
+    registry.invalidate();
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -301,6 +304,7 @@ server.registerTool(
     const a = registry.get(adapter);
     if (!a.restartSession) return notImplemented(adapter, "restartSession");
     await a.restartSession(id);
+    registry.invalidate();
     return asJsonText({ ok: true, adapter, id });
   },
 );
@@ -322,6 +326,7 @@ server.registerTool(
     const a = registry.get(adapter);
     if (!a.removeSession) return notImplemented(adapter, "removeSession");
     await a.removeSession(id, { deleteWorktree, deleteBranch, force });
+    registry.invalidate();
     return asJsonText({ ok: true, adapter, id });
   },
 );
