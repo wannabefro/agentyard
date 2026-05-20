@@ -12,6 +12,8 @@ import type {
 import type { Session, SessionStatus } from "@/core/session.ts";
 import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
 import { AoeCliError, runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   aoeCaptureSchema,
   aoeListSchema,
@@ -203,6 +205,7 @@ function entryToSession(
   entry: AoeListEntry,
   status: SessionStatus = "unknown",
   summary: string | null = null,
+  nativeSessionId: string | null = null,
 ): Session {
   return {
     adapter: ADAPTER_NAME,
@@ -218,10 +221,52 @@ function entryToSession(
     createdAt: parseDate(entry.created_at),
     lastActivityAt: null,
     idleSinceAt: null,
-    nativeSessionId: null,
+    nativeSessionId,
     summary,
     raw: entry,
   };
+}
+
+// Reads aoe's raw sessions.json to extract the agent_session_id field —
+// the underlying agent's native UUID (Claude Code's, Codex's). Neither
+// `aoe list --json` nor `aoe session show --json` exposes this field; only
+// the raw file does. See docs/research/agent-of-empires.md.
+//
+// This is the join key that lets us correlate aoe-wrapped sessions with
+// the same agent's standalone-adapter view, which is the prerequisite for
+// the cross-adapter ownership check in src/core/ownership.ts.
+//
+// Best-effort: a missing or unreadable sessions.json returns an empty map.
+// Non-default profiles (aoe profile switch <name>) live at
+// ~/.agent-of-empires/profiles/<name>/sessions.json — override via the
+// adapter's sessionsJsonPath constructor option.
+export type AgentSessionIdMap = Map<string, string>;
+
+// Exported for unit testing of the JSON shape parsing.
+export async function readAgentSessionIdMap(path: string): Promise<AgentSessionIdMap> {
+  const map: AgentSessionIdMap = new Map();
+  let text: string;
+  try {
+    text = await Bun.file(path).text();
+  } catch {
+    return map;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return map;
+  }
+  if (!Array.isArray(parsed)) return map;
+  for (const entry of parsed) {
+    if (entry && typeof entry === "object") {
+      const e = entry as Record<string, unknown>;
+      if (typeof e.id === "string" && typeof e.agent_session_id === "string" && e.agent_session_id.length > 0) {
+        map.set(e.id, e.agent_session_id);
+      }
+    }
+  }
+  return map;
 }
 
 // Cap the per-session summary so the field is small enough to ride along on
@@ -259,7 +304,11 @@ async function summaryFor(id: string): Promise<string | null> {
   }
 }
 
-function showToSession(show: AoeSessionShow, base: Session | null): Session {
+function showToSession(
+  show: AoeSessionShow,
+  base: Session | null,
+  nativeSessionId: string | null = null,
+): Session {
   return {
     adapter: ADAPTER_NAME,
     id: show.id,
@@ -274,18 +323,44 @@ function showToSession(show: AoeSessionShow, base: Session | null): Session {
     createdAt: base?.createdAt ?? null,
     lastActivityAt: null,
     idleSinceAt: null,
-    nativeSessionId: null,
+    nativeSessionId: nativeSessionId ?? base?.nativeSessionId ?? null,
     summary: base?.summary ?? null,
     raw: { show, list: base?.raw ?? null },
   };
 }
 
+export type AoeAdapterOptions = {
+  // Override the path to aoe's raw sessions.json (used to extract
+  // agent_session_id for cross-adapter correlation). Defaults to
+  // ~/.agent-of-empires/profiles/default/sessions.json. The aoe CLI itself
+  // supports profile switching via `aoe profile`, so non-default profiles
+  // live at ~/.agent-of-empires/profiles/<name>/sessions.json — point here
+  // if the user's active profile isn't "default".
+  sessionsJsonPath?: string;
+};
+
+const DEFAULT_SESSIONS_JSON_PATH = join(
+  homedir(),
+  ".agent-of-empires",
+  "profiles",
+  "default",
+  "sessions.json",
+);
+
 export class AoeAdapter implements Adapter {
   readonly name = ADAPTER_NAME;
+  readonly sessionsJsonPath: string;
+
+  constructor(opts: AoeAdapterOptions = {}) {
+    this.sessionsJsonPath = opts.sessionsJsonPath ?? DEFAULT_SESSIONS_JSON_PATH;
+  }
 
   async listSessions(opts: ListSessionsOptions = {}): Promise<Session[]> {
     const wantSummary = opts.withSummary === true;
-    const entries = await runJson(aoeListSchema, ["list", "--json"]);
+    const [entries, agentIdMap] = await Promise.all([
+      runJson(aoeListSchema, ["list", "--json"]),
+      readAgentSessionIdMap(this.sessionsJsonPath),
+    ]);
     const enriched = await Promise.all(
       entries.map(async (e) => {
         const [show, summary] = await Promise.all([
@@ -300,22 +375,33 @@ export class AoeAdapter implements Adapter {
           // the caller only wants list_sessions to enumerate ids/titles.
           wantSummary ? summaryFor(e.id) : Promise.resolve(null),
         ]);
-        return entryToSession(e, show?.status ?? "unknown", summary);
+        return entryToSession(
+          e,
+          show?.status ?? "unknown",
+          summary,
+          agentIdMap.get(e.id) ?? null,
+        );
       }),
     );
     return enriched;
   }
 
   async getSession(id: string): Promise<Session | null> {
-    const [show, list] = await Promise.all([
+    const [show, list, agentIdMap] = await Promise.all([
       runJson(aoeSessionShowSchema, ["session", "show", id, "--json"]).catch(
         () => null,
       ),
       runJson(aoeListSchema, ["list", "--json"]),
+      readAgentSessionIdMap(this.sessionsJsonPath),
     ]);
     if (!show) return null;
     const base = list.find((e) => e.id === show.id);
-    return showToSession(show, base ? entryToSession(base) : null);
+    const nativeId = agentIdMap.get(show.id) ?? null;
+    return showToSession(
+      show,
+      base ? entryToSession(base, "unknown", null, nativeId) : null,
+      nativeId,
+    );
   }
 
   async getOutput(id: string, lines = 200): Promise<OutputSnapshot> {

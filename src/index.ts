@@ -336,13 +336,22 @@ server.registerTool(
   async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs, readyTimeoutMs }) => {
     const t = await resolveTarget({ adapter, id });
     if (!t.ok) return asJsonText({ error: t.reason });
-    const result = await sendThenWait(registry.get(t.adapter), t.id, text, {
-      changeTimeoutMs,
-      idleTimeoutMs,
-      idleWindowMs,
-      pollIntervalMs,
-      readyTimeoutMs,
-    });
+    const result = await sendThenWait(
+      registry.get(t.adapter),
+      t.id,
+      text,
+      {
+        changeTimeoutMs,
+        idleTimeoutMs,
+        idleWindowMs,
+        pollIntervalMs,
+        readyTimeoutMs,
+      },
+      // Pass the registry so the loop's cross-adapter ownership preflight
+      // can run — refuses send when another adapter (typically aoe) has a
+      // live attach to the same underlying agent session.
+      registry,
+    );
     return asJsonText(result);
   },
 );

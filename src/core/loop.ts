@@ -4,6 +4,11 @@ import type {
   SendThenWaitOptions,
   SendThenWaitResult,
 } from "@/adapters/types.ts";
+import {
+  findCrossAdapterOwners,
+  formatOwnershipConflictReason,
+} from "@/core/ownership.ts";
+import type { AdapterRegistry } from "@/core/registry.ts";
 
 const ECHO_MIN_LENGTH = 8;
 const ECHO_NEEDLE_MAX = 30;
@@ -112,9 +117,16 @@ export async function sendThenWait(
   id: string,
   text: string,
   opts: SendThenWaitOptions,
+  // Optional. When provided, the loop performs a cross-adapter ownership
+  // preflight: if any OTHER registered adapter surfaces the same underlying
+  // agent session (matched via nativeSessionId) in a live status, the
+  // sendThenWait is refused with a clear conflict reason. See
+  // src/core/ownership.ts for rationale. Direct adapter use (e.g. live
+  // dogfood scripts) doesn't pass a registry and bypasses the check.
+  registry?: AdapterRegistry,
 ): Promise<SendThenWaitResult> {
   return withSessionLock(`${adapter.name}:${id}`, () =>
-    sendThenWaitImpl(adapter, id, text, opts),
+    sendThenWaitImpl(adapter, id, text, opts, registry),
   );
 }
 
@@ -123,7 +135,40 @@ async function sendThenWaitImpl(
   id: string,
   text: string,
   opts: SendThenWaitOptions,
+  registry?: AdapterRegistry,
 ): Promise<SendThenWaitResult> {
+  // Cross-adapter ownership preflight. Done BEFORE any other work so a
+  // refusal is cheap — no subprocess spawn, no pane capture, no
+  // waitForReady. Resolving the calling adapter's nativeSessionId requires
+  // a getSession call; if that returns null we can't enforce the check and
+  // proceed (the underlying adapter will surface "session not found").
+  if (registry) {
+    const session = await adapter.getSession(id);
+    if (session?.nativeSessionId) {
+      const conflicts = await findCrossAdapterOwners(
+        registry,
+        adapter.name,
+        session.nativeSessionId,
+      );
+      if (conflicts.length > 0) {
+        const empty: OutputSnapshot = { content: "", lines: 0 };
+        return {
+          ok: false,
+          changed: false,
+          settled: false,
+          before: empty,
+          after: empty,
+          elapsedMs: 0,
+          reason: formatOwnershipConflictReason(
+            adapter.name,
+            session.nativeSessionId,
+            conflicts,
+          ),
+        };
+      }
+    }
+  }
+
   if (adapter.sendThenWait) {
     return adapter.sendThenWait(id, text, opts);
   }
