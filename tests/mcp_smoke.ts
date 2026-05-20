@@ -6,7 +6,7 @@
 // Uses AGENTYARD_MOCK=1 so the assertions are deterministic on machines with
 // no aoe CLI or local Claude Code transcripts (e.g. GitHub runners).
 
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -223,6 +223,28 @@ const noSelection = await callTool("get_output", { lines: 10 });
 expect(
   typeof noSelection.error === "string" && noSelection.error.includes("no session selected"),
   `get_output() without selection -> error: ${noSelection.error}`,
+);
+
+// 7b. Auto-expiry: write a stale selection directly to the state file
+// (bypassing select_session's validation), then call get_output() with no
+// args. The fallback should validate, find the session missing, clear the
+// state file, and return a "no longer exists" error.
+writeFileSync(
+  statePath,
+  JSON.stringify({
+    version: 1,
+    selected: { adapter: "mock", id: "mock-session-was-removed" },
+  }),
+);
+const staleResp = await callTool("get_output", { lines: 10 });
+expect(
+  typeof staleResp.error === "string" && staleResp.error.includes("no longer exists"),
+  `get_output() with stale selection -> error: ${staleResp.error}`,
+);
+const onDiskAfterExpiry = JSON.parse(readFileSync(statePath, "utf8"));
+expect(
+  onDiskAfterExpiry.selected === null,
+  `state file after auto-expiry: selected=${JSON.stringify(onDiskAfterExpiry.selected)}`,
 );
 
 // --- switch_session + chat ---

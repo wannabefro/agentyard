@@ -37,6 +37,9 @@ async function resolveTarget(args: {
   adapter?: string | undefined;
   id?: string | undefined;
 }): Promise<{ ok: true; adapter: string; id: string } | { ok: false; reason: string }> {
+  // Explicit args always win and are not validated — callers passing
+  // (adapter, id) directly know what they want; downstream "session not
+  // found" failures bubble up from the adapter as normal.
   if (args.adapter && args.id) {
     return { ok: true, adapter: args.adapter, id: args.id };
   }
@@ -49,6 +52,33 @@ async function resolveTarget(args: {
         "or pass both adapter and id explicitly.",
     };
   }
+
+  // Auto-expiry: validate the selection still resolves to a real session
+  // before falling back. Without this, every subsequent fallback call would
+  // fail with the same "session not found" error against a stale pointer
+  // (the canonical case: user selected a session, it got removed by aoe or
+  // its transcript file was deleted, and now the selection is stuck).
+  // Validation cost is one getSession per fallback — acceptable for the
+  // interactive flow this tool surface is designed for.
+  try {
+    const adapterImpl = registry.get(sel.adapter);
+    const session = await adapterImpl.getSession(sel.id);
+    if (!session) {
+      await selectionStore.clear();
+      return {
+        ok: false,
+        reason:
+          `selected session ${sel.adapter}/${sel.id} no longer exists — selection cleared. ` +
+          `Use switch_session or select_session to pick a new one.`,
+      };
+    }
+  } catch (e) {
+    // Validation itself failed (adapter threw, e.g., the underlying CLI
+    // is missing). Prefer to attempt the call rather than incorrectly
+    // clearing the selection over a transient error — the downstream
+    // tool will produce its own actionable failure.
+  }
+
   return {
     ok: true,
     adapter: args.adapter ?? sel.adapter,
