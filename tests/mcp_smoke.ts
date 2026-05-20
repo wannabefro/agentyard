@@ -6,9 +6,21 @@
 // Uses AGENTYARD_MOCK=1 so the assertions are deterministic on machines with
 // no aoe CLI or local Claude Code transcripts (e.g. GitHub runners).
 
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_CMD = ["bun", "run", "src/index.ts"];
-const SERVER_ENV = { ...process.env, AGENTYARD_MOCK: "1" };
+// Override the selection state path so the smoke test doesn't touch
+// ~/.agentyard/state.json on the developer's machine.
+const stateDir = mkdtempSync(join(tmpdir(), "agentyard-mcp-smoke-"));
+const statePath = join(stateDir, "state.json");
+const SERVER_ENV = {
+  ...process.env,
+  AGENTYARD_MOCK: "1",
+  AGENTYARD_STATE_PATH: statePath,
+};
 
 type JsonRpcMessage = {
   jsonrpc: "2.0";
@@ -98,6 +110,7 @@ const expectedTools = [
   "remove_session",
   "resolve_session",
   "restart_session",
+  "select_session",
   "send_input",
   "send_then_wait",
   "start_session",
@@ -156,5 +169,60 @@ expect(
   `resolve_session("fender evals") -> top candidate: ${resolvePayload.candidates[0]?.title} (score ${resolvePayload.candidates[0]?.score.toFixed(2)})`,
 );
 
+// --- selection flow ---
+
+async function callTool(name: string, args: Record<string, unknown>) {
+  const resp = await send("tools/call", { name, arguments: args });
+  const text = ((resp.result as { content: { text: string }[] }).content[0]?.text) ?? "";
+  return JSON.parse(text);
+}
+
+// 1. Read selection — should be empty initially since we use a fresh tmp state.
+const initialSel = await callTool("select_session", {});
+expect(initialSel.selected === null, `select_session({}) initially -> selected=${JSON.stringify(initialSel.selected)}`);
+
+// 2. Set selection to a known mock session.
+const setResp = await callTool("select_session", { adapter: "mock", id: "mock-fender-evals" });
+expect(
+  setResp.action === "set" && setResp.selected?.id === "mock-fender-evals",
+  `select_session(set) -> action=${setResp.action} title=${setResp.title}`,
+);
+expect(existsSync(statePath), `state file persisted at ${statePath}`);
+const onDisk = JSON.parse(readFileSync(statePath, "utf8"));
+expect(onDisk.selected?.id === "mock-fender-evals", `on-disk state.selected.id == mock-fender-evals`);
+
+// 3. get_output WITHOUT adapter/id — must fall back to the selection.
+const fallbackOutput = await callTool("get_output", { lines: 10 });
+expect(
+  typeof fallbackOutput.content === "string" && fallbackOutput.content.includes("fender-evals"),
+  `get_output() with no args falls back to selection: content head="${(fallbackOutput.content as string).slice(0, 60).replace(/\n/g, " ")}"`,
+);
+
+// 4. Setting a nonexistent session must fail with a "session not found" error.
+const badSet = await callTool("select_session", { adapter: "mock", id: "does-not-exist" });
+expect(
+  typeof badSet.error === "string" && badSet.error.includes("session not found"),
+  `select_session(invalid) -> error: ${badSet.error}`,
+);
+
+// 5. Setting only one of adapter/id is rejected with a clear error.
+const halfSet = await callTool("select_session", { adapter: "mock" });
+expect(
+  typeof halfSet.error === "string" && halfSet.error.includes("both adapter and id"),
+  `select_session(half) -> error: ${halfSet.error}`,
+);
+
+// 6. Clear the selection.
+const cleared = await callTool("select_session", { clear: true });
+expect(cleared.selected === null && cleared.action === "cleared", `select_session(clear) -> ${JSON.stringify(cleared)}`);
+
+// 7. After clear, get_output with no args must error rather than crash.
+const noSelection = await callTool("get_output", { lines: 10 });
+expect(
+  typeof noSelection.error === "string" && noSelection.error.includes("no session selected"),
+  `get_output() without selection -> error: ${noSelection.error}`,
+);
+
 proc.kill();
+rmSync(stateDir, { recursive: true, force: true });
 console.log("\nMCP smoke test OK");

@@ -10,6 +10,7 @@ import { MockAdapter } from "@/adapters/mock/index.ts";
 import type { Session } from "@/core/session.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
+import { SelectionStore } from "@/core/selection.ts";
 import { resolve } from "@/resolver/index.ts";
 import pkg from "../package.json" with { type: "json" };
 
@@ -19,6 +20,40 @@ registry.register(new ClaudeCodeAdapter());
 registry.register(new CodexAdapter());
 if (process.env.AGENTYARD_MOCK === "1") {
   registry.register(new MockAdapter());
+}
+
+// Persistent "current session" pointer. Tools that act on a session
+// (get_output, send_then_wait, lifecycle ops) accept optional adapter/id
+// and fall back to this selection. See src/core/selection.ts.
+const selectionStore = new SelectionStore(
+  process.env.AGENTYARD_STATE_PATH || undefined,
+);
+
+// Resolve a session target from optional args + the persistent selection.
+// Returns either {adapter, id} or a structured error. Tools should call
+// this and short-circuit with notImplemented-style asJsonText when it
+// errors. Explicit args always win and do NOT update the selection.
+async function resolveTarget(args: {
+  adapter?: string | undefined;
+  id?: string | undefined;
+}): Promise<{ ok: true; adapter: string; id: string } | { ok: false; reason: string }> {
+  if (args.adapter && args.id) {
+    return { ok: true, adapter: args.adapter, id: args.id };
+  }
+  const sel = await selectionStore.get();
+  if (!sel) {
+    return {
+      ok: false,
+      reason:
+        "no session selected and (adapter, id) not provided. Call select_session first, " +
+        "or pass both adapter and id explicitly.",
+    };
+  }
+  return {
+    ok: true,
+    adapter: args.adapter ?? sel.adapter,
+    id: args.id ?? sel.id,
+  };
 }
 
 const server = new McpServer(
@@ -135,18 +170,90 @@ server.registerTool(
 );
 
 server.registerTool(
+  "select_session",
+  {
+    title: "Select (or read/clear) current session",
+    description:
+      "Pin a session as the current selection for subsequent tool calls. " +
+      "Tools that target a session (get_session, get_output, send_input, " +
+      "send_then_wait, wait_idle, wait_for_ready, start/stop/restart/remove_session) " +
+      "fall back to this selection when adapter/id are omitted. The selection " +
+      "persists across MCP reconnects via ~/.agentyard/state.json. " +
+      "Pass {adapter, id} to set; pass {clear: true} to drop the selection; " +
+      "pass no args to read the current selection.",
+    inputSchema: {
+      adapter: z.string().optional().describe(
+        "Adapter to select. Required when setting; ignored when reading or clearing.",
+      ),
+      id: z.string().optional().describe(
+        "Session id to select. Required when setting; ignored when reading or clearing.",
+      ),
+      clear: z.boolean().default(false).describe(
+        "If true, drop the current selection. Mutually exclusive with adapter/id.",
+      ),
+    },
+  },
+  async ({ adapter, id, clear }) => {
+    if (clear) {
+      await selectionStore.clear();
+      return asJsonText({ selected: null, action: "cleared" });
+    }
+    if (adapter && id) {
+      // Verify the (adapter, id) actually exists before pinning — pinning an
+      // invalid pair would just make every subsequent call fail.
+      let adapterImpl;
+      try {
+        adapterImpl = registry.get(adapter);
+      } catch (e) {
+        return asJsonText({
+          error: `unknown adapter '${adapter}'`,
+          registered: registry.list(),
+        });
+      }
+      const session = await adapterImpl.getSession(id);
+      if (!session) {
+        return asJsonText({
+          error: `session not found`,
+          adapter,
+          id,
+          hint: "use resolve_session or list_sessions to find a valid id",
+        });
+      }
+      await selectionStore.set({ adapter, id });
+      return asJsonText({
+        selected: { adapter, id },
+        action: "set",
+        title: session.title,
+        workdir: session.workdir,
+      });
+    }
+    if (adapter || id) {
+      return asJsonText({
+        error: "to set a selection, provide both adapter and id (or neither to read)",
+      });
+    }
+    const current = await selectionStore.get();
+    return asJsonText({ selected: current });
+  },
+);
+
+server.registerTool(
   "get_session",
   {
     title: "Get session",
-    description: "Fetch full detail for one session, including live status.",
+    description:
+      "Fetch full detail for one session, including live status. " +
+      "When both adapter and id are omitted, falls back to the current selection (see select_session).",
     inputSchema: {
-      adapter: z.string().describe("Adapter name, e.g. 'aoe'"),
-      id: z.string().describe("Session id"),
+      adapter: z.string().optional().describe("Adapter name, e.g. 'aoe'"),
+      id: z.string().optional().describe("Session id"),
     },
   },
   async ({ adapter, id }) => {
-    const session = await registry.get(adapter).getSession(id);
-    if (!session) return asJsonText({ error: "session not found", adapter, id });
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const session = await registry.get(t.adapter).getSession(t.id);
+    if (!session) return asJsonText({ error: "session not found", adapter: t.adapter, id: t.id });
     return asJsonText(session);
   },
 );
@@ -156,15 +263,18 @@ server.registerTool(
   {
     title: "Get session output",
     description:
-      "Read the last N lines of a session's output. Always returns flat `content` (string) and `lines` (number). Conversation-shaped adapters (e.g. claude-code) also return `structured`: an array of {role, text, timestamp?, kind?} messages so hosts can render or filter typed messages without re-parsing the flat text.",
+      "Read the last N lines of a session's output. Always returns flat `content` (string) and `lines` (number). Conversation-shaped adapters (e.g. claude-code) also return `structured`: an array of {role, text, timestamp?, kind?} messages so hosts can render or filter typed messages without re-parsing the flat text. " +
+      "adapter/id are optional; when omitted, the current selection is used (see select_session).",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       lines: z.number().int().min(1).max(2000).default(200),
     },
   },
   async ({ adapter, id, lines }) => {
-    const snap = await registry.get(adapter).getOutput(id, lines);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const snap = await registry.get(t.adapter).getOutput(t.id, lines);
     return asJsonText(snap);
   },
 );
@@ -183,8 +293,8 @@ server.registerTool(
       "send_then_wait, which polls the pane for evidence the agent saw " +
       "the input.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       text: z.string().min(0).describe(
         "Text to send. Empty string sends a bare Enter, useful for confirming " +
         "default selections in TUI prompts (e.g. Claude Code's trust prompt).",
@@ -192,9 +302,11 @@ server.registerTool(
     },
   },
   async ({ adapter, id, text }) => {
-    const a = registry.get(adapter);
-    if (!a.sendInput) return notImplemented(adapter, "sendInput");
-    const result = await a.sendInput(id, text);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.sendInput) return notImplemented(t.adapter, "sendInput");
+    const result = await a.sendInput(t.id, text);
     return asJsonText(result);
   },
 );
@@ -211,8 +323,8 @@ server.registerTool(
       "whether each phase succeeded. This is the canonical loop primitive — call it " +
       "in a loop from a host to drive an agent through multi-turn work.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       text: z.string().min(1),
       changeTimeoutMs: z.number().int().min(500).max(120_000).default(15_000),
       idleTimeoutMs: z.number().int().min(1000).max(600_000).default(120_000),
@@ -222,7 +334,9 @@ server.registerTool(
     },
   },
   async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs, readyTimeoutMs }) => {
-    const result = await sendThenWait(registry.get(adapter), id, text, {
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const result = await sendThenWait(registry.get(t.adapter), t.id, text, {
       changeTimeoutMs,
       idleTimeoutMs,
       idleWindowMs,
@@ -240,17 +354,19 @@ server.registerTool(
     description:
       "Poll the session's pane until output has been unchanged for `idleWindowMs`, or until `timeoutMs` elapses.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       timeoutMs: z.number().int().min(1000).max(600_000).default(60_000),
       idleWindowMs: z.number().int().min(500).max(60_000).default(3000),
       pollIntervalMs: z.number().int().min(250).max(10_000).default(1000),
     },
   },
   async ({ adapter, id, timeoutMs, idleWindowMs, pollIntervalMs }) => {
-    const a = registry.get(adapter);
-    if (!a.waitIdle) return notImplemented(adapter, "waitIdle");
-    const result = await a.waitIdle(id, {
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.waitIdle) return notImplemented(t.adapter, "waitIdle");
+    const result = await a.waitIdle(t.id, {
       timeoutMs,
       idleWindowMs,
       pollIntervalMs,
@@ -270,22 +386,24 @@ server.registerTool(
       "agents with other prompt shapes (OpenCode, Gemini CLI, Copilot CLI, Mistral Vibe, Pi.dev, " +
       "Factory Droid Coding) will time out — call this only for the supported tools.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       timeoutMs: z.number().int().min(500).max(120_000).default(30_000),
       pollIntervalMs: z.number().int().min(250).max(10_000).default(500),
     },
   },
   async ({ adapter, id, timeoutMs, pollIntervalMs }) => {
-    const a = registry.get(adapter);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ ready: false, reason: t.reason, lastLine: "" });
+    const a = registry.get(t.adapter);
     if (!a.waitForReady) {
       return asJsonText({
         ready: false,
-        reason: `adapter '${adapter}' does not implement waitForReady`,
+        reason: `adapter '${t.adapter}' does not implement waitForReady`,
         lastLine: "",
       });
     }
-    const result = await a.waitForReady(id, { timeoutMs, pollIntervalMs });
+    const result = await a.waitForReady(t.id, { timeoutMs, pollIntervalMs });
     return asJsonText(result);
   },
 );
@@ -307,7 +425,11 @@ server.registerTool(
     if (!a.createSession) return notImplemented(adapter, "createSession");
     const result = await a.createSession({ path, title, cmd });
     registry.invalidate();
-    return asJsonText({ adapter, ...result });
+    // Auto-select the newly created session — the natural next action is
+    // to interact with it, and re-typing (adapter, id) every call defeats
+    // the point of having a selection.
+    await selectionStore.set({ adapter, id: result.id });
+    return asJsonText({ adapter, ...result, selected: true });
   },
 );
 
@@ -317,16 +439,18 @@ server.registerTool(
     title: "Start session",
     description: "Start a stopped agent session.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
     },
   },
   async ({ adapter, id }) => {
-    const a = registry.get(adapter);
-    if (!a.startSession) return notImplemented(adapter, "startSession");
-    await a.startSession(id);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.startSession) return notImplemented(t.adapter, "startSession");
+    await a.startSession(t.id);
     registry.invalidate();
-    return asJsonText({ ok: true, adapter, id });
+    return asJsonText({ ok: true, adapter: t.adapter, id: t.id });
   },
 );
 
@@ -336,16 +460,18 @@ server.registerTool(
     title: "Stop session",
     description: "Stop a running agent session.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
     },
   },
   async ({ adapter, id }) => {
-    const a = registry.get(adapter);
-    if (!a.stopSession) return notImplemented(adapter, "stopSession");
-    await a.stopSession(id);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.stopSession) return notImplemented(t.adapter, "stopSession");
+    await a.stopSession(t.id);
     registry.invalidate();
-    return asJsonText({ ok: true, adapter, id });
+    return asJsonText({ ok: true, adapter: t.adapter, id: t.id });
   },
 );
 
@@ -355,16 +481,18 @@ server.registerTool(
     title: "Restart session",
     description: "Restart a session (stop then start).",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
     },
   },
   async ({ adapter, id }) => {
-    const a = registry.get(adapter);
-    if (!a.restartSession) return notImplemented(adapter, "restartSession");
-    await a.restartSession(id);
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.restartSession) return notImplemented(t.adapter, "restartSession");
+    await a.restartSession(t.id);
     registry.invalidate();
-    return asJsonText({ ok: true, adapter, id });
+    return asJsonText({ ok: true, adapter: t.adapter, id: t.id });
   },
 );
 
@@ -372,21 +500,31 @@ server.registerTool(
   "remove_session",
   {
     title: "Remove session",
-    description: "Remove a session record and optionally its worktree/branch.",
+    description:
+      "Remove a session record and optionally its worktree/branch. " +
+      "If the removed session is the current selection, the selection is auto-cleared.",
     inputSchema: {
-      adapter: z.string(),
-      id: z.string(),
+      adapter: z.string().optional(),
+      id: z.string().optional(),
       deleteWorktree: z.boolean().default(false),
       deleteBranch: z.boolean().default(false),
       force: z.boolean().default(false),
     },
   },
   async ({ adapter, id, deleteWorktree, deleteBranch, force }) => {
-    const a = registry.get(adapter);
-    if (!a.removeSession) return notImplemented(adapter, "removeSession");
-    await a.removeSession(id, { deleteWorktree, deleteBranch, force });
+    const t = await resolveTarget({ adapter, id });
+    if (!t.ok) return asJsonText({ error: t.reason });
+    const a = registry.get(t.adapter);
+    if (!a.removeSession) return notImplemented(t.adapter, "removeSession");
+    await a.removeSession(t.id, { deleteWorktree, deleteBranch, force });
     registry.invalidate();
-    return asJsonText({ ok: true, adapter, id });
+    // If we just removed the selected session, dropping the stale pointer
+    // avoids confusing every subsequent call with "session not found".
+    const sel = await selectionStore.get();
+    if (sel && sel.adapter === t.adapter && sel.id === t.id) {
+      await selectionStore.clear();
+    }
+    return asJsonText({ ok: true, adapter: t.adapter, id: t.id });
   },
 );
 
