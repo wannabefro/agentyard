@@ -10,6 +10,22 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-20
+
+### Fixed
+
+- `serverInfo.version` is now sourced from `package.json` instead of a
+  hard-coded literal in `src/index.ts`. Published 0.1.1 still reported
+  `0.1.0` over MCP because the literal wasn't bumped; 0.1.2 picks up the
+  correct value automatically on every release.
+
+### Changed
+
+- MCP smoke test (`tests/mcp_smoke.ts`) is now portable. It opts into a
+  deterministic mock adapter via `AGENTYARD_MOCK=1` so the assertions
+  pass on GitHub runners and on any machine without local `aoe` sessions
+  or Claude Code transcripts. Production callers don't load the mock.
+
 ## [0.1.1] - 2026-05-20
 
 ### Fixed
@@ -51,6 +67,7 @@ Initial pre-release.
   `docs/research/claude-code.md`. The Conductor.build exploration is parked
   in `docs/research/conductor.md` for a possible later adapter.
 
-[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/wannabefro/agentyard/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/wannabefro/agentyard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/wannabefro/agentyard/releases/tag/v0.1.0
