@@ -2,10 +2,16 @@ import type { ZodTypeAny, z } from "zod";
 
 class AoeCliError extends Error {
   constructor(
-    message: string,
+    baseMessage: string,
     public readonly exitCode: number,
     public readonly stderr: string,
   ) {
+    // Include a short stderr excerpt in the message so the failure is
+    // diagnosable from just the propagated Error — important for MCP
+    // clients that only see the message text. Trim to keep the message
+    // bounded; the full stderr is still on .stderr for callers who need it.
+    const excerpt = stderr.trim().split("\n").slice(0, 3).join(" | ").slice(0, 240);
+    const message = excerpt ? `${baseMessage}: ${excerpt}` : baseMessage;
     super(message);
     this.name = "AoeCliError";
   }

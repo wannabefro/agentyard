@@ -165,6 +165,126 @@ describe("sendThenWait with echo verification", () => {
     expect(result.changed).toBe(true);
   });
 
+  test("per-session lock serializes concurrent calls on the same session", async () => {
+    // Concurrent send_then_wait against the same (adapter, id) used to be
+    // racy — both calls would observe pane changes from the other and
+    // potentially report misleading settled flags. The lock added in 0.1.5
+    // makes them serialize: B waits for A to complete before starting.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const adapter: Adapter = {
+      name: "lock-test",
+      listSessions: async () => [],
+      getSession: async () => null,
+      getOutput: async () => ({ content: "", lines: 0 }),
+      sendInput: async () => ({ ok: true }),
+      waitIdle: async () => ({ settled: true, lastSnapshot: { content: "", lines: 0 } }),
+      createSession: async () => { throw new Error("not implemented"); },
+      startSession: async () => {},
+      stopSession: async () => {},
+      restartSession: async () => {},
+      removeSession: async () => {},
+      sendThenWait: async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Bun.sleep(30); // simulate work
+        inFlight -= 1;
+        return {
+          ok: true,
+          changed: true,
+          settled: true,
+          before: { content: "", lines: 0 },
+          after: { content: "", lines: 0 },
+          elapsedMs: 30,
+        };
+      },
+    };
+    await Promise.all([
+      sendThenWait(adapter, "sess-1", "first call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+      sendThenWait(adapter, "sess-1", "second call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+      sendThenWait(adapter, "sess-1", "third call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+    ]);
+    expect(maxInFlight).toBe(1);
+  });
+
+  test("per-session lock does not block calls to different sessions", async () => {
+    // Cross-session concurrency is the common case (driving multiple
+    // agents in parallel) and must remain fast — the lock is keyed by
+    // (adapter.name, id) so different ids run in parallel.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const adapter: Adapter = {
+      name: "lock-test-cross",
+      listSessions: async () => [],
+      getSession: async () => null,
+      getOutput: async () => ({ content: "", lines: 0 }),
+      sendInput: async () => ({ ok: true }),
+      waitIdle: async () => ({ settled: true, lastSnapshot: { content: "", lines: 0 } }),
+      createSession: async () => { throw new Error("not implemented"); },
+      startSession: async () => {},
+      stopSession: async () => {},
+      restartSession: async () => {},
+      removeSession: async () => {},
+      sendThenWait: async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Bun.sleep(30);
+        inFlight -= 1;
+        return {
+          ok: true,
+          changed: true,
+          settled: true,
+          before: { content: "", lines: 0 },
+          after: { content: "", lines: 0 },
+          elapsedMs: 30,
+        };
+      },
+    };
+    await Promise.all([
+      sendThenWait(adapter, "session-A", "first call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+      sendThenWait(adapter, "session-B", "second call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+      sendThenWait(adapter, "session-C", "third call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+    ]);
+    expect(maxInFlight).toBe(3);
+  });
+
+  test("a failed call doesn't poison the lock for subsequent callers", async () => {
+    // If a sendThenWait rejects (e.g. sendInput throws), the next caller
+    // queued behind it should still run, not see a stale rejected promise.
+    let callIdx = 0;
+    const adapter: Adapter = {
+      name: "lock-poison-test",
+      listSessions: async () => [],
+      getSession: async () => null,
+      getOutput: async () => ({ content: "", lines: 0 }),
+      sendInput: async () => ({ ok: true }),
+      waitIdle: async () => ({ settled: true, lastSnapshot: { content: "", lines: 0 } }),
+      createSession: async () => { throw new Error("not implemented"); },
+      startSession: async () => {},
+      stopSession: async () => {},
+      restartSession: async () => {},
+      removeSession: async () => {},
+      sendThenWait: async () => {
+        const i = callIdx++;
+        if (i === 0) throw new Error("first call fails");
+        return {
+          ok: true,
+          changed: true,
+          settled: true,
+          before: { content: "", lines: 0 },
+          after: { content: "", lines: 0 },
+          elapsedMs: 1,
+        };
+      },
+    };
+    const [first, second] = await Promise.allSettled([
+      sendThenWait(adapter, "sess-1", "first call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+      sendThenWait(adapter, "sess-1", "second call here", { changeTimeoutMs: 1, idleTimeoutMs: 1, idleWindowMs: 1 }),
+    ]);
+    expect(first.status).toBe("rejected");
+    expect(second.status).toBe("fulfilled");
+  });
+
   test("adapter sendThenWait override is preferred", async () => {
     const adapter: Adapter = {
       name: "override-adapter",

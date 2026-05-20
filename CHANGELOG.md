@@ -10,6 +10,39 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-20
+
+### Fixed
+
+- **aoe `waitForReady` against current Claude Code TUI.** Previous heuristic
+  ("last non-empty line ends with `❯`") missed v2.1+ Claude Code, which
+  renders a multi-line status footer below the input cursor (model name,
+  context %, MCP status). The check now scans up to 20 recent non-empty
+  lines for a cursor at line-start, which also catches selector menus
+  (first-run trust prompt sat on the "Yes, I trust" option line with
+  "Enter to confirm" below). Fixture-based tests cover real pane shapes.
+- **`AoeAdapter.getOutput` graceful "session not found".** Previously threw
+  a CLI error that propagated to the MCP layer as a raw text isError;
+  inconsistent with `getSession` (returns structured `{ error: ... }`)
+  and with claude-code's `getOutput` (returns empty snapshot). Now returns
+  `{ content: "", lines: 0 }` when the underlying aoe CLI reports session
+  not found. Loop primitives that call `getOutput` in polling loops can
+  no longer abort if the session disappears mid-flight.
+- **`AoeCliError` message now includes a stderr excerpt.** Dogfood caught
+  concurrent `aoe session start` failures whose actual reason was
+  invisible — only the exit-code text propagated. The error message now
+  carries the first three lines of stderr (capped at 240 chars). Full
+  stderr remains on `.stderr` for programmatic callers.
+
+### Changed
+
+- **`sendThenWait` is now safe to call concurrently** on the same
+  `(adapter, id)` — calls serialize via a per-session promise chain.
+  Previously two callers polling the same pane could each be misled by
+  the other's settlement signal. Cross-session concurrency (different
+  sessions) is unchanged and runs in parallel as before. A failed call
+  does not poison the lock for subsequent callers.
+
 ## [0.1.4] - 2026-05-20
 
 ### Added
@@ -121,7 +154,8 @@ Initial pre-release.
   `docs/research/claude-code.md`. The Conductor.build exploration is parked
   in `docs/research/conductor.md` for a possible later adapter.
 
-[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/wannabefro/agentyard/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/wannabefro/agentyard/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/wannabefro/agentyard/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/wannabefro/agentyard/compare/v0.1.1...v0.1.2

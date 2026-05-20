@@ -83,7 +83,42 @@ async function waitForEcho(
   return { echoed: false, changed: finalChanged, snapshot, tooShort: false };
 }
 
+// Per-session locks so concurrent sendThenWait calls on the same
+// (adapter, id) serialize. Two callers polling the same pane otherwise
+// can't tell each other's settlement signals apart — a B-arrives-while-A-
+// is-mid-flight scenario observed in dogfood where both calls reported
+// settled=true but only the second prompt's response was actually rendered.
+// Cross-session concurrency (different sessions) is unaffected and runs
+// in parallel as before.
+const sessionLocks = new Map<string, Promise<unknown>>();
+
+async function withSessionLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = sessionLocks.get(key) ?? Promise.resolve();
+  // chain regardless of previous's outcome — a failed call shouldn't
+  // permanently poison the lock for subsequent callers.
+  const next = previous.then(fn, fn);
+  sessionLocks.set(key, next);
+  try {
+    return await next;
+  } finally {
+    // Only clear the slot if no one queued behind us, to keep the map
+    // bounded over many sessions.
+    if (sessionLocks.get(key) === next) sessionLocks.delete(key);
+  }
+}
+
 export async function sendThenWait(
+  adapter: Adapter,
+  id: string,
+  text: string,
+  opts: SendThenWaitOptions,
+): Promise<SendThenWaitResult> {
+  return withSessionLock(`${adapter.name}:${id}`, () =>
+    sendThenWaitImpl(adapter, id, text, opts),
+  );
+}
+
+async function sendThenWaitImpl(
   adapter: Adapter,
   id: string,
   text: string,

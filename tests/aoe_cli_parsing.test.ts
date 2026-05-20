@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { AoeCliError } from "@/adapters/aoe/cli.ts";
 
 // Re-declared inline so the test catches accidental changes to the production regex.
 // If you change SESSION_ID_RE in src/adapters/aoe/index.ts, update this fixture and confirm
@@ -39,5 +40,36 @@ describe("SESSION_ID_RE", () => {
   test("ignores leading whitespace variation", () => {
     expect(SESSION_ID_RE.exec("ID: abc123\n")?.[1]).toBe("abc123");
     expect(SESSION_ID_RE.exec("    ID:    abc123\n")?.[1]).toBe("abc123");
+  });
+});
+
+describe("AoeCliError", () => {
+  test("includes a stderr excerpt in the message", () => {
+    // 0.1.4 and earlier left stderr in .stderr but constructed the
+    // message field with only the exit code text. When the error bubbled
+    // through the MCP layer, callers could see only "aoe foo failed with
+    // exit 1" — no context for diagnosis. The dogfood pass caught this
+    // when concurrent `aoe session start` failed and the actual reason
+    // was lost.
+    const err = new AoeCliError(
+      "aoe session start abc failed with exit 1",
+      1,
+      "Error: another aoe session start is already running\nplease retry",
+    );
+    expect(err.message).toContain("aoe session start abc failed with exit 1");
+    expect(err.message).toContain("another aoe session start is already running");
+    // Full stderr is still on .stderr for programmatic callers
+    expect(err.stderr).toContain("please retry");
+  });
+
+  test("falls back to base message when stderr is empty", () => {
+    const err = new AoeCliError("aoe list failed with exit 1", 1, "");
+    expect(err.message).toBe("aoe list failed with exit 1");
+  });
+
+  test("caps the stderr excerpt at a bounded length", () => {
+    const huge = "x".repeat(10_000);
+    const err = new AoeCliError("aoe foo failed", 1, huge);
+    expect(err.message.length).toBeLessThan(500);
   });
 });

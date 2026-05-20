@@ -9,7 +9,7 @@ import type {
   SendResult,
 } from "@/adapters/types.ts";
 import type { Session, SessionStatus } from "@/core/session.ts";
-import { runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
+import { AoeCliError, runJson, runRaw, runVoid } from "@/adapters/aoe/cli.ts";
 import {
   aoeCaptureSchema,
   aoeListSchema,
@@ -189,16 +189,30 @@ export class AoeAdapter implements Adapter {
   }
 
   async getOutput(id: string, lines = 200): Promise<OutputSnapshot> {
-    const capture = await runJson(aoeCaptureSchema, [
-      "session",
-      "capture",
-      id,
-      "--json",
-      "--strip-ansi",
-      "-n",
-      String(lines),
-    ]);
-    return { content: capture.content, lines: capture.lines };
+    try {
+      const capture = await runJson(aoeCaptureSchema, [
+        "session",
+        "capture",
+        id,
+        "--json",
+        "--strip-ansi",
+        "-n",
+        String(lines),
+      ]);
+      return { content: capture.content, lines: capture.lines };
+    } catch (err) {
+      // Match the graceful "session not found" pattern used by
+      // claude-code's getOutput and by AoeAdapter.getSession itself.
+      // Loop primitives (waitIdle / sendThenWait) call getOutput in
+      // polling loops; if the session disappeared mid-flight we want
+      // them to observe an empty pane, not hard-throw and abort cleanup.
+      // Other CLI errors (aoe daemon missing, permission denied) still
+      // propagate.
+      if (err instanceof AoeCliError && /session not found/i.test(err.stderr)) {
+        return { content: "", lines: 0 };
+      }
+      throw err;
+    }
   }
 
   async sendInput(id: string, text: string): Promise<SendResult> {
