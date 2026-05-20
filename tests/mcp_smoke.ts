@@ -103,6 +103,7 @@ const tools = await send("tools/list", {});
 const toolList = (tools.result as { tools: { name: string; inputSchema: { properties?: Record<string, unknown> } }[] }).tools;
 const toolNames = toolList.map((t) => t.name).sort();
 const expectedTools = [
+  "chat",
   "create_session",
   "get_output",
   "get_session",
@@ -115,6 +116,7 @@ const expectedTools = [
   "send_then_wait",
   "start_session",
   "stop_session",
+  "switch_session",
   "wait_for_ready",
   "wait_idle",
 ];
@@ -221,6 +223,46 @@ const noSelection = await callTool("get_output", { lines: 10 });
 expect(
   typeof noSelection.error === "string" && noSelection.error.includes("no session selected"),
   `get_output() without selection -> error: ${noSelection.error}`,
+);
+
+// --- switch_session + chat ---
+
+// 8. switch_session("fender evals") should auto-pick (unambiguous in mock
+// fixture; a real fender-evals on the dev machine works the same way).
+// We only assert that ok=true and a fender-evals titled session was pinned.
+const sw1 = await callTool("switch_session", { query: "fender evals" });
+expect(
+  sw1.ok === true && typeof sw1.title === "string" && sw1.title.toLowerCase().includes("fender"),
+  `switch_session("fender evals") -> ok=${sw1.ok} title="${sw1.title}" score=${sw1.score?.toFixed?.(2) ?? sw1.score}`,
+);
+
+// 9. switch_session with a clearly-no-match query.
+// Use a long random string that won't fuzzy-match anything. Asserts that
+// either no candidates matched, OR the resolver is at least honest enough
+// to flag it as ambiguous (top score not clearly dominant).
+const sw2 = await callTool("switch_session", { query: "qzzwwqqzzqwqxqqqxxqq" });
+expect(
+  sw2.ok === false,
+  `switch_session(nonsense) -> ok=${sw2.ok} ambiguous=${sw2.ambiguous} error="${sw2.error ?? sw2.reason}"`,
+);
+
+// 10. chat() with selection set sends and returns the response.
+// The mock adapter doesn't implement sendThenWait, so it'll fail via the
+// loop's "adapter does not support sendThenWait (read-only)" path. We
+// still expect a structured ok=false response (not a crash) — verifies
+// chat threads errors through cleanly.
+const chatResult = await callTool("chat", { text: "hello" });
+expect(
+  chatResult.ok === false && typeof chatResult.error === "string",
+  `chat(): ok=${chatResult.ok} error="${chatResult.error}"`,
+);
+
+// 11. chat() with no selection returns the "no session selected" error.
+await callTool("select_session", { clear: true });
+const chatNoSel = await callTool("chat", { text: "hello" });
+expect(
+  chatNoSel.ok === false && chatNoSel.error?.includes("no session selected"),
+  `chat() without selection -> error: ${chatNoSel.error}`,
 );
 
 proc.kill();

@@ -124,6 +124,27 @@ server.registerTool(
   },
 );
 
+// Pull the most recent assistant message text out of an OutputSnapshot's
+// structured field. Used by `chat` to return just the response rather than
+// the whole before/after blob. Returns null when there's no structured
+// data (e.g. aoe pane captures) — caller should fall back to raw content.
+function lastAssistantText(snap: { structured?: { role: string; text: string }[] }): string | null {
+  const items = snap.structured;
+  if (!items || items.length === 0) return null;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const m = items[i]!;
+    if (m.role === "assistant" && m.text) return m.text;
+  }
+  return null;
+}
+
+const CHAT_FALLBACK_SNIPPET_LINES = 30;
+
+function trailingSnippet(content: string): string {
+  const lines = content.split("\n").filter((l) => l.length > 0);
+  return lines.slice(-CHAT_FALLBACK_SNIPPET_LINES).join("\n");
+}
+
 function slimSession(
   s: Session,
   opts: { withSummary: boolean; withRaw: boolean },
@@ -165,6 +186,81 @@ server.registerTool(
         score: c.score,
         reasons: c.reasons,
       })),
+    });
+  },
+);
+
+server.registerTool(
+  "switch_session",
+  {
+    title: "Switch to a session by natural-language query",
+    description:
+      "One-call resolve + pin: takes a free-text query, picks the top resolver candidate, " +
+      "and sets it as the current selection (persisted via ~/.agentyard/state.json). " +
+      "Refuses ambiguous queries — when the top candidate isn't clearly better than the runner-up, " +
+      "returns the candidates without pinning so the caller can disambiguate. Pass force=true to " +
+      "pick the top anyway, or refine the query (add tool/status filters, more title keywords).",
+    inputSchema: {
+      query: z.string().min(1).describe("Free-text reference to a session"),
+      force: z.boolean().default(false).describe(
+        "Pin the top candidate even when the resolver thinks it's ambiguous.",
+      ),
+    },
+  },
+  async ({ query, force }) => {
+    const sessions = await registry.listAllSessions("cached", { withSummary: true });
+    const candidates = resolve(query, sessions).slice(0, 5);
+    if (candidates.length === 0) {
+      return asJsonText({
+        ok: false,
+        ambiguous: false,
+        error: "no candidates matched the query",
+        query,
+      });
+    }
+
+    const top = candidates[0]!;
+    const second = candidates[1];
+    // Ambiguity rule: top must be at least 30% higher-scoring than #2.
+    // The 1.3x ratio came from the live "recent codex session" probe — that
+    // query produced 5 candidates clustered 1.6-1.8, and any of them being
+    // auto-picked would have been wrong. A clean win like "fender evals" had
+    // the top at ~8 with #2 well below; that ratio is far above 1.3x.
+    const isAmbiguous =
+      !force && second !== undefined && top.score < 1.3 * second.score;
+
+    const candidateView = candidates.map((c) => ({
+      adapter: c.session.adapter,
+      id: c.session.id,
+      title: c.session.title,
+      tool: c.session.tool,
+      branch: c.session.branch,
+      score: c.score,
+      reasons: c.reasons,
+    }));
+
+    if (isAmbiguous) {
+      return asJsonText({
+        ok: false,
+        ambiguous: true,
+        reason:
+          `top candidate score=${top.score.toFixed(2)} is not clearly better than runner-up ${second!.score.toFixed(2)} ` +
+          `(threshold: 1.3x). Pass force=true to pick the top anyway, or refine the query.`,
+        query,
+        candidates: candidateView,
+      });
+    }
+
+    await selectionStore.set({ adapter: top.session.adapter, id: top.session.id });
+    return asJsonText({
+      ok: true,
+      selected: { adapter: top.session.adapter, id: top.session.id },
+      title: top.session.title,
+      workdir: top.session.workdir,
+      score: top.score,
+      reasons: top.reasons,
+      forced: force && second !== undefined && top.score < 1.3 * second.score,
+      alternatives: candidateView.slice(1),
     });
   },
 );
@@ -353,6 +449,56 @@ server.registerTool(
       registry,
     );
     return asJsonText(result);
+  },
+);
+
+server.registerTool(
+  "chat",
+  {
+    title: "Chat: send a message to the selected session (shorthand)",
+    description:
+      "Minimal shorthand for send_then_wait against the current selection. " +
+      "Requires that a session is already selected (via select_session or switch_session). " +
+      "Returns just {ok, response, elapsedMs, warnings?} instead of full before/after " +
+      "snapshots — meant to keep host context small in multi-turn loops. " +
+      "For diagnostic detail (cwd warnings, ownership conflicts, ANSI), use send_then_wait.",
+    inputSchema: {
+      text: z.string().min(1).describe("Message to send to the selected session"),
+      changeTimeoutMs: z.number().int().min(500).max(120_000).default(15_000),
+      idleTimeoutMs: z.number().int().min(1000).max(600_000).default(120_000),
+      idleWindowMs: z.number().int().min(500).max(60_000).default(5_000),
+      readyTimeoutMs: z.number().int().min(500).max(120_000).default(30_000),
+    },
+  },
+  async ({ text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, readyTimeoutMs }) => {
+    const t = await resolveTarget({});
+    if (!t.ok) return asJsonText({ ok: false, error: t.reason });
+    const result = await sendThenWait(
+      registry.get(t.adapter),
+      t.id,
+      text,
+      { changeTimeoutMs, idleTimeoutMs, idleWindowMs, readyTimeoutMs },
+      registry,
+    );
+    if (!result.ok) {
+      return asJsonText({
+        ok: false,
+        error: result.reason,
+        elapsedMs: result.elapsedMs,
+        warnings: result.warnings,
+      });
+    }
+    // Extract just the most recent assistant message. Adapters that
+    // populate `structured` (claude-code, codex) give us a clean
+    // role-tagged message list; for adapters without structured output
+    // (aoe pane captures), fall back to the trailing snippet of content.
+    const response = lastAssistantText(result.after) ?? trailingSnippet(result.after.content);
+    return asJsonText({
+      ok: true,
+      response,
+      elapsedMs: result.elapsedMs,
+      warnings: result.warnings,
+    });
   },
 );
 
