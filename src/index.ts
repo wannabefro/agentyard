@@ -4,12 +4,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { AoeAdapter } from "@/adapters/aoe/index.ts";
+import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
 import { resolve } from "@/resolver/index.ts";
 
 const registry = new AdapterRegistry();
 registry.register(new AoeAdapter());
+registry.register(new ClaudeCodeAdapter());
 
 const server = new McpServer(
   { name: "pepper", version: "0.0.1" },
