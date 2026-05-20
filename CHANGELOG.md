@@ -10,6 +10,28 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-20
+
+### Added
+
+- `OutputSnapshot.structured?: SessionMessage[]` — optional typed-message
+  array for conversation-shaped adapters. `SessionMessage` is
+  `{role, text, timestamp?, kind?}`. Additive: `content` is unchanged
+  and every existing host keeps working. claude-code now populates
+  `structured` directly from transcripts so hosts that want typed
+  messages no longer have to re-parse the flat text rendering. aoe and
+  other pane-based adapters leave it undefined.
+
+### Performance
+
+- `AdapterRegistry.listAllSessions()` now caches across calls with a
+  configurable TTL (default 5000ms, `AGENTYARD_LIST_TTL_MS` override).
+  Concurrent calls share one inflight fetch. Write-path tool handlers
+  (`create_session`, `start_session`, `stop_session`, `restart_session`,
+  `remove_session`) invalidate the cache so the next list is fresh.
+  Opt out per call with `listAllSessions("live")`. Local measurement
+  with 139 transcripts: 396ms cold → 0.01ms warm.
+
 ## [0.1.2] - 2026-05-20
 
 ### Fixed
@@ -67,7 +89,8 @@ Initial pre-release.
   `docs/research/claude-code.md`. The Conductor.build exploration is parked
   in `docs/research/conductor.md` for a possible later adapter.
 
-[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/wannabefro/agentyard/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/wannabefro/agentyard/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/wannabefro/agentyard/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/wannabefro/agentyard/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/wannabefro/agentyard/releases/tag/v0.1.0
