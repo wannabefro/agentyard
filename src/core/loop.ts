@@ -148,6 +148,13 @@ async function sendThenWaitImpl(
     const readyMs = opts.readyTimeoutMs ?? 30_000;
     const ready = await adapter.waitForReady(id, { timeoutMs: readyMs, pollIntervalMs: pollMs });
     if (!ready.ready) {
+      // Preserve the adapter's contextual reason — the aoe adapter, for
+      // example, returns a menu-aware reason ("agent showing a selector
+      // menu; dismiss it...") that's far more actionable than a generic
+      // "prompt cursor not detected".
+      const why = ready.reason
+        ? `agent not ready: ${ready.reason}`
+        : `agent not ready (no prompt cursor detected within ${readyMs}ms)`;
       return {
         ok: false,
         changed: false,
@@ -155,7 +162,7 @@ async function sendThenWaitImpl(
         before,
         after: before,
         elapsedMs: Date.now() - started,
-        reason: `agent not ready (prompt cursor not detected within ${readyMs}ms)`,
+        reason: why,
       };
     }
   }

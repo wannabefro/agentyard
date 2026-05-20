@@ -216,4 +216,28 @@ describe("waitForReady", () => {
     expect(result.reason).toContain("prompt cursor not detected");
     expect(adapter.sendCount).toBe(0);
   });
+
+  test("sendThenWait surfaces the adapter's contextual reason on readiness failure", async () => {
+    // Adapter that returns a specific reason (e.g. menu detection) — the
+    // loop primitive must preserve it so MCP hosts can act on the cause
+    // instead of seeing a generic timeout message.
+    const reasonFromAdapter = "agent showing a selector menu; dismiss it before sending text";
+    const customAdapter = {
+      ...mockAdapter({ paneScript: ["booting..."] }),
+      waitForReady: async () => ({
+        ready: false,
+        reason: reasonFromAdapter,
+        lastLine: "❯ 1. Yes, I trust this folder",
+      }),
+    };
+    const result = await sendThenWait(customAdapter, "sess", "please summarize", {
+      changeTimeoutMs: 500,
+      idleTimeoutMs: 500,
+      idleWindowMs: 50,
+      pollIntervalMs: 20,
+      readyTimeoutMs: 80,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain(reasonFromAdapter);
+  });
 });
