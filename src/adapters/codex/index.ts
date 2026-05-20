@@ -10,7 +10,7 @@ import type {
   SendThenWaitResult,
 } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
-import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
+import { ensureSpawnCwd, findBinary, spawnEnv } from "@/core/spawn_env.ts";
 import {
   discoverRollouts,
   extractMessages,
@@ -134,8 +134,17 @@ export class CodexAdapter implements Adapter {
       id,
       text,
     ];
+    // codex exec resume is not cwd-dependent for session lookup — see
+    // docs/research/codex.md. But the AGENT's tool calls still operate
+    // against the spawn cwd, so we try to chdir to the original session
+    // workdir and fall back to process.cwd() if it's gone (worktree pruned,
+    // scratch dir cleaned up, etc.). Bun.spawn returns a misleading
+    // "ENOENT posix_spawn '<binary>'" when cwd doesn't exist — see
+    // src/core/spawn_env.ts:ensureSpawnCwd for the gory details.
+    const cwdResolved = await ensureSpawnCwd(session.workdir, "fallback");
+    if (cwdResolved.warning) console.error(`[codex] ${cwdResolved.warning}`);
     const proc = Bun.spawn([findBinary("codex"), ...args], {
-      cwd: session.workdir || process.cwd(),
+      cwd: cwdResolved.cwd,
       env: spawnEnv(),
       stdout: "pipe",
       stderr: "pipe",

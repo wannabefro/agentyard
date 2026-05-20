@@ -9,7 +9,7 @@ import type {
   SendThenWaitResult,
 } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
-import { findBinary, spawnEnv } from "@/core/spawn_env.ts";
+import { ensureSpawnCwd, findBinary, spawnEnv } from "@/core/spawn_env.ts";
 import {
   discoverTranscripts,
   extractMessages,
@@ -117,10 +117,18 @@ export class ClaudeCodeAdapter implements Adapter {
 
     const before = await this.getOutput(id, 200);
 
+    // `claude --resume` is cwd-dependent (see docs/research/claude-code.md):
+    // it derives the session-file path from the cwd at session creation, so
+    // resuming from a different cwd fails with "No conversation found".
+    // The research doc notes that if the original cwd path is gone, an
+    // empty directory at that path is sufficient. ensureSpawnCwd with
+    // "create" policy handles both the existing-dir and recreate cases.
+    const cwdResolved = await ensureSpawnCwd(session.workdir, "create");
+    if (cwdResolved.warning) console.error(`[claude-code] ${cwdResolved.warning}`);
     const proc = Bun.spawn(
       [findBinary("claude"), "--resume", id, "--print", "--output-format", "json", text],
       {
-        cwd: session.workdir,
+        cwd: cwdResolved.cwd,
         env: spawnEnv(),
         stdout: "pipe",
         stderr: "pipe",

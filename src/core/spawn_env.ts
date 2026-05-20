@@ -67,3 +67,78 @@ export function spawnEnv(extra: Record<string, string> = {}): Record<string, str
   env.PATH = augmentedPath();
   return { ...env, ...extra };
 }
+
+// Resolves a child-process cwd that may not exist on disk.
+//
+// Surfaced by a real failure: Bun.spawn with cwd pointing at a nonexistent
+// directory fails with `ENOENT posix_spawn '<binary>'` — the error message
+// blames the binary, not the cwd, which is wildly misleading. Repro:
+//
+//   Bun.spawn(["/opt/homebrew/bin/codex", "--version"], { cwd: "/no/such/dir" })
+//   → "ENOENT: no such file or directory, posix_spawn '/opt/homebrew/bin/codex'"
+//
+// This shows up in agentyard whenever a session's recorded cwd has been
+// deleted since the session was created (worktree pruned, mkdtempSync
+// scratch dir cleaned up, project moved). The session metadata in
+// ~/.codex/sessions/.../rollout-*.jsonl or ~/.claude/projects/.../*.jsonl
+// preserves the original cwd, but the path may no longer exist.
+//
+// Policies:
+//   "fallback" — if cwd is missing, return process.cwd() with a warning.
+//     Use when the agent doesn't strictly need the original workspace
+//     (codex: `codex exec resume <id>` looks up by id alone, not by cwd).
+//   "create"   — if cwd is missing, create it (recursive mkdir) and use it.
+//     Use when the agent DOES need that exact path (claude-code: `claude
+//     --resume` requires the cwd to exist — empty is fine).
+
+export type EnsureCwdPolicy = "fallback" | "create";
+
+export type EnsureCwdResult = {
+  cwd: string;
+  warning?: string;
+};
+
+export async function ensureSpawnCwd(
+  preferredPath: string | undefined | null,
+  policy: EnsureCwdPolicy,
+): Promise<EnsureCwdResult> {
+  const target = preferredPath?.trim();
+  if (!target) return { cwd: process.cwd() };
+
+  const exists = await directoryExists(target);
+  if (exists) return { cwd: target };
+
+  if (policy === "create") {
+    try {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(target, { recursive: true });
+      return {
+        cwd: target,
+        warning: `session workdir "${target}" did not exist; created an empty directory so the agent can resume`,
+      };
+    } catch (e) {
+      // mkdir can fail for legitimate reasons (read-only parent, perms).
+      // Fall through to the fallback policy.
+      const reason = e instanceof Error ? e.message : String(e);
+      return {
+        cwd: process.cwd(),
+        warning: `session workdir "${target}" is missing and could not be created (${reason}); spawning in ${process.cwd()} — agent file ops will operate against the wrong workspace`,
+      };
+    }
+  }
+
+  return {
+    cwd: process.cwd(),
+    warning: `session workdir "${target}" no longer exists; spawning in ${process.cwd()} — agent file ops will operate against the wrong workspace`,
+  };
+}
+
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    const { stat } = await import("node:fs/promises");
+    const s = await stat(path);
+    return s.isDirectory();
+  } catch {
+    return false;
+  }
+}

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { _resetBinaryCache, findBinary, spawnEnv } from "@/core/spawn_env.ts";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { _resetBinaryCache, ensureSpawnCwd, findBinary, spawnEnv } from "@/core/spawn_env.ts";
 
 describe("spawnEnv", () => {
   let originalPath: string | undefined;
@@ -101,5 +105,72 @@ describe("findBinary", () => {
     const second = findBinary("ls");
     process.env.PATH = originalPath;
     expect(second).toBe(first);
+  });
+});
+
+describe("ensureSpawnCwd", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "agentyard-cwd-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("returns the requested cwd when it exists, no warning", async () => {
+    const result = await ensureSpawnCwd(root, "fallback");
+    expect(result.cwd).toBe(root);
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("falls back to process.cwd() when input is missing/empty", async () => {
+    expect((await ensureSpawnCwd(undefined, "fallback")).cwd).toBe(process.cwd());
+    expect((await ensureSpawnCwd("", "fallback")).cwd).toBe(process.cwd());
+    expect((await ensureSpawnCwd(null, "fallback")).cwd).toBe(process.cwd());
+  });
+
+  test("fallback policy: missing dir → process.cwd() with warning", async () => {
+    const missing = join(root, "nope");
+    const result = await ensureSpawnCwd(missing, "fallback");
+    expect(result.cwd).toBe(process.cwd());
+    expect(result.warning).toContain("no longer exists");
+    expect(result.warning).toContain(missing);
+  });
+
+  test("create policy: missing dir → creates it and uses it", async () => {
+    const missing = join(root, "deeply", "nested", "missing");
+    const result = await ensureSpawnCwd(missing, "create");
+    expect(result.cwd).toBe(missing);
+    expect(existsSync(missing)).toBe(true);
+    expect(result.warning).toContain("did not exist");
+    expect(result.warning).toContain("created an empty directory");
+  });
+
+  test("create policy: existing dir stays unchanged, no warning", async () => {
+    const result = await ensureSpawnCwd(root, "create");
+    expect(result.cwd).toBe(root);
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("non-directory path (file) is treated as missing under fallback", async () => {
+    // A file at the path is not a usable cwd. ensureSpawnCwd should NOT
+    // treat it as "exists" — directoryExists checks isDirectory().
+    const filePath = join(root, "not-a-dir");
+    writeFileSync(filePath, "marker");
+    const result = await ensureSpawnCwd(filePath, "fallback");
+    expect(result.cwd).toBe(process.cwd());
+    expect(result.warning).toContain("no longer exists");
+  });
+
+  test("create policy reports a warning when mkdir fails", async () => {
+    // A file blocks the target path — mkdir will fail with EEXIST/ENOTDIR.
+    const blocked = join(root, "blocker");
+    writeFileSync(blocked, "x");
+    const subdir = join(blocked, "would-be-created-here");
+    const result = await ensureSpawnCwd(subdir, "create");
+    expect(result.cwd).toBe(process.cwd());
+    expect(result.warning).toContain("could not be created");
   });
 });
