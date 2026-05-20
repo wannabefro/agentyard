@@ -10,6 +10,43 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-20
+
+### Added
+
+- **`claude-code` adapter now supports writes.** `ClaudeCodeAdapter`
+  implements `sendThenWait` by spawning `claude --resume <id> --print
+  --output-format json <text>` from the session's recorded cwd,
+  appending one agent turn to the transcript, and returning before/after
+  snapshots. Hosts can now drive Claude Code sessions through the MCP
+  layer the same way they drive aoe sessions, with the same return
+  shape. See `docs/research/claude-code.md` (Write support section) for
+  the empirical findings that informed the contract — notably the
+  cwd-dependency of `--resume`, the JSON output schema, and the per-turn
+  cache-creation cost (~$0.35/turn at the current default model, since
+  there is no warm prompt cache across fresh subprocess invocations).
+
+### Notes on the claude-code write contract
+
+- `sendInput` is intentionally NOT implemented on claude-code. The
+  underlying CLI is fundamentally synchronous (one subprocess = one full
+  agent turn); a fire-and-forget claim would be the same kind of
+  misleading contract `send_input("")` was in 0.2.0. Hosts that need
+  fire-and-forget use aoe; hosts that need guaranteed delivery use
+  `sendThenWait` on either adapter.
+- `waitIdle` / `waitForReady` remain omitted — not applicable to a
+  spawn-per-turn model with no terminal pane.
+- Lifecycle ops (`create/start/stop/restart/remove`) remain omitted;
+  no orchestrator use case has surfaced yet.
+
+### Tests
+
+- 4 new unit tests for `parseClaudePrintResult` (the brittle bit of the
+  write path — Claude Code's JSON stdout schema).
+- New live dogfood probe `tests/live_dogfood_claude_code_write.ts` —
+  resumes a real transcript, sends a new prompt, observes the agent's
+  response appended.
+
 ## [0.2.1] - 2026-05-20
 
 ### Fixed
