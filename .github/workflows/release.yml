@@ -49,6 +49,11 @@ jobs:
     needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
+      # gh release needs a repo context (git or --repo). Cheaper to check out
+      # at depth=1 than to thread --repo through every gh call below.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
       - uses: actions/download-artifact@v5
         with:
           path: dist/
