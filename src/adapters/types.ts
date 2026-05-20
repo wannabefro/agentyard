@@ -75,10 +75,18 @@ export type RemoveSessionOpts = {
   force?: boolean;
 };
 
+// Options for listSessions. `withSummary` controls whether the per-session
+// content summary is populated. The aoe adapter's summary requires a CLI
+// capture per session — for a 149-session catalog that is ~149 extra
+// subprocess invocations on every call, so it is opt-in. Default = false.
+export type ListSessionsOptions = {
+  withSummary?: boolean;
+};
+
 export type Adapter = {
   readonly name: string;
 
-  listSessions(): Promise<Session[]>;
+  listSessions(opts?: ListSessionsOptions): Promise<Session[]>;
   getSession(id: string): Promise<Session | null>;
 
   getOutput(id: string, lines?: number): Promise<OutputSnapshot>;

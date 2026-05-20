@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { Adapter, OutputSnapshot } from "@/adapters/types.ts";
+import type { Adapter, ListSessionsOptions, OutputSnapshot } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
 import {
   discoverTranscripts,
@@ -27,7 +27,11 @@ export class ClaudeCodeAdapter implements Adapter {
     this.projectsRoot = opts.projectsRoot ?? join(homedir(), ".claude", "projects");
   }
 
-  async listSessions(): Promise<Session[]> {
+  // `opts` is accepted for interface conformance; the in-process transcript
+  // summarize is cheap (no subprocess fan-out) so claude-code always returns
+  // a populated summary. The MCP layer is responsible for stripping it from
+  // the response when the caller didn't ask for it.
+  async listSessions(_opts: ListSessionsOptions = {}): Promise<Session[]> {
     const transcripts = await discoverTranscripts(this.projectsRoot);
     const sessions: Session[] = [];
     for (const t of transcripts) {

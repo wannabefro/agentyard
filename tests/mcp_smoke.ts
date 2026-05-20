@@ -124,8 +124,24 @@ const listResp = await send("tools/call", {
   arguments: {},
 });
 const listText = ((listResp.result as { content: { text: string }[] }).content[0]?.text) ?? "";
-const listPayload = JSON.parse(listText) as { count: number; sessions: { title: string }[] };
-expect(listPayload.count > 0, `list_sessions -> ${listPayload.count} sessions`);
+const listPayload = JSON.parse(listText) as {
+  total: number;
+  offset: number;
+  limit: number;
+  returned: number;
+  sessions: { title: string; summary?: unknown; raw?: unknown }[];
+};
+expect(listPayload.total > 0, `list_sessions -> total=${listPayload.total}`);
+expect(
+  listPayload.returned <= listPayload.limit,
+  `list_sessions -> returned=${listPayload.returned} <= limit=${listPayload.limit}`,
+);
+// Default shape is slim: each session must omit summary + raw.
+const firstSession = listPayload.sessions[0];
+expect(
+  firstSession !== undefined && !("summary" in firstSession) && !("raw" in firstSession),
+  `list_sessions default omits summary+raw (first session keys: ${firstSession ? Object.keys(firstSession).join(",") : "n/a"})`,
+);
 
 const resolveResp = await send("tools/call", {
   name: "resolve_session",

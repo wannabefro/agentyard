@@ -10,6 +10,27 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+### Changed (breaking, pre-1.0)
+
+- **`list_sessions` MCP tool now returns a slim, paginated response.**
+  Default catalog dump overflowed Claude Code's tool-output budget
+  (149 aoe sessions → 187 KB). New shape:
+  `{ total, offset, limit, returned, sessions }` — `count` is gone
+  (replaced by `total`). Each session in the response omits `summary`
+  and `raw` by default. New input params: `withSummary` (default false,
+  opt in to populate per-session content summaries — adds one aoe
+  capture per session), `withRaw` (default false, adapter-native
+  payloads), `limit` (default 50, max 500), `offset` (default 0).
+  `resolve_session` internally requests `withSummary: true` so content
+  matching keeps working.
+- **`Adapter.listSessions` now accepts an optional `ListSessionsOptions`
+  arg.** Existing no-arg callers continue to work; the `AoeAdapter`
+  uses it to skip the per-session capture when summaries aren't
+  requested.
+- **`AdapterRegistry` now caches slim and full listings in separate
+  buckets.** A slim `list_sessions` call no longer poisons the full
+  listing that `resolve_session` relies on, and vice versa.
+
 ### Fixed
 
 - **Concurrent aoe lifecycle calls (`createSession`, `startSession`,

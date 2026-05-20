@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AoeAdapter } from "@/adapters/aoe/index.ts";
 import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
 import { MockAdapter } from "@/adapters/mock/index.ts";
+import type { Session } from "@/core/session.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
 import { resolve } from "@/resolver/index.ts";
@@ -45,14 +46,57 @@ server.registerTool(
   "list_sessions",
   {
     title: "List sessions",
-    description: "List every known agent session across all registered adapters.",
-    inputSchema: {},
+    description:
+      "List every known agent session across all registered adapters. " +
+      "Returns a slim shape by default — per-session `summary` and `raw` " +
+      "fields are stripped to keep the response within MCP host token " +
+      "budgets (the user's catalog of 149 aoe sessions overflowed without " +
+      "this). Set withSummary=true to include the content summary used by " +
+      "resolve_session's content matching; set withRaw=true to include the " +
+      "adapter-native response objects. Use limit/offset to paginate.",
+    inputSchema: {
+      withSummary: z.boolean().default(false).describe(
+        "Include each session's content summary (~up to 1500 chars per " +
+        "aoe session). Adds a CLI capture per aoe session — slow on large " +
+        "catalogs.",
+      ),
+      withRaw: z.boolean().default(false).describe(
+        "Include adapter-native raw response objects on each session. " +
+        "Verbose; only useful for debugging adapter normalization.",
+      ),
+      limit: z.number().int().min(1).max(500).default(50).describe(
+        "Maximum number of sessions to return (after applying offset).",
+      ),
+      offset: z.number().int().min(0).default(0).describe(
+        "Number of sessions to skip from the start of the catalog.",
+      ),
+    },
   },
-  async () => {
-    const sessions = await registry.listAllSessions();
-    return asJsonText({ count: sessions.length, sessions });
+  async ({ withSummary, withRaw, limit, offset }) => {
+    const all = await registry.listAllSessions("cached", { withSummary });
+    const total = all.length;
+    const page = all.slice(offset, offset + limit);
+    const sessions = page.map((s) => slimSession(s, { withSummary, withRaw }));
+    return asJsonText({
+      total,
+      offset,
+      limit,
+      returned: sessions.length,
+      sessions,
+    });
   },
 );
+
+function slimSession(
+  s: Session,
+  opts: { withSummary: boolean; withRaw: boolean },
+): Partial<Session> {
+  const { summary: _summary, raw: _raw, ...rest } = s;
+  const out: Partial<Session> = { ...rest };
+  if (opts.withSummary) out.summary = s.summary;
+  if (opts.withRaw) out.raw = s.raw;
+  return out;
+}
 
 server.registerTool(
   "resolve_session",
@@ -67,7 +111,9 @@ server.registerTool(
     },
   },
   async ({ query, limit }) => {
-    const sessions = await registry.listAllSessions();
+    // Resolver's content matching scores against Session.summary; request
+    // the full listing so summaries are populated.
+    const sessions = await registry.listAllSessions("cached", { withSummary: true });
     const candidates = resolve(query, sessions).slice(0, limit);
     return asJsonText({
       query,

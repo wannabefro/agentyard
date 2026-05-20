@@ -1,4 +1,4 @@
-import type { Adapter } from "@/adapters/types.ts";
+import type { Adapter, ListSessionsOptions } from "@/adapters/types.ts";
 import type { Session } from "@/core/session.ts";
 
 const DEFAULT_TTL_MS = 5000;
@@ -12,11 +12,18 @@ function readEnvTtl(): number {
 
 export type ListFreshness = "cached" | "live";
 
+// Slim listings (no summary) and full listings (with summary) cost very
+// different things to produce — the aoe adapter fires one extra CLI capture
+// per session for the summary. Cache them separately so a slim list_sessions
+// call doesn't invalidate the resolver's summary-bearing list, and vice
+// versa.
+type CacheEntry = { at: number; sessions: Session[] };
+
 export class AdapterRegistry {
   private readonly adapters = new Map<string, Adapter>();
   private readonly ttlMs: number;
-  private cache: { at: number; sessions: Session[] } | null = null;
-  private inflight: Promise<Session[]> | null = null;
+  private readonly caches = new Map<boolean, CacheEntry>();
+  private readonly inflights = new Map<boolean, Promise<Session[]>>();
 
   constructor(opts: { ttlMs?: number } = {}) {
     this.ttlMs = opts.ttlMs ?? readEnvTtl();
@@ -43,28 +50,38 @@ export class AdapterRegistry {
   }
 
   invalidate(): void {
-    this.cache = null;
+    this.caches.clear();
   }
 
-  async listAllSessions(freshness: ListFreshness = "cached"): Promise<Session[]> {
-    if (freshness === "cached" && this.cache && Date.now() - this.cache.at < this.ttlMs) {
-      return this.cache.sessions;
+  async listAllSessions(
+    freshness: ListFreshness = "cached",
+    opts: ListSessionsOptions = {},
+  ): Promise<Session[]> {
+    const wantSummary = opts.withSummary === true;
+    const cached = this.caches.get(wantSummary);
+    if (freshness === "cached" && cached && Date.now() - cached.at < this.ttlMs) {
+      return cached.sessions;
     }
-    if (this.inflight) return this.inflight;
+    const inflight = this.inflights.get(wantSummary);
+    if (inflight) return inflight;
 
-    this.inflight = (async () => {
-      const settled = await Promise.allSettled(
-        [...this.adapters.values()].map((a) => a.listSessions()),
-      );
-      const out: Session[] = [];
-      for (const r of settled) {
-        if (r.status === "fulfilled") out.push(...r.value);
-        else console.error(`adapter listSessions failed:`, r.reason);
+    const next = (async () => {
+      try {
+        const settled = await Promise.allSettled(
+          [...this.adapters.values()].map((a) => a.listSessions(opts)),
+        );
+        const out: Session[] = [];
+        for (const r of settled) {
+          if (r.status === "fulfilled") out.push(...r.value);
+          else console.error(`adapter listSessions failed:`, r.reason);
+        }
+        this.caches.set(wantSummary, { at: Date.now(), sessions: out });
+        return out;
+      } finally {
+        this.inflights.delete(wantSummary);
       }
-      this.cache = { at: Date.now(), sessions: out };
-      this.inflight = null;
-      return out;
     })();
-    return this.inflight;
+    this.inflights.set(wantSummary, next);
+    return next;
   }
 }

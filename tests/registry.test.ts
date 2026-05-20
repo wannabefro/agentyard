@@ -27,11 +27,13 @@ function makeSession(id: string, title = id): Session {
 class CountingAdapter implements Adapter {
   readonly name = "stub";
   calls = 0;
+  callsWithSummary = 0;
 
   constructor(private sessions: Session[]) {}
 
-  async listSessions(): Promise<Session[]> {
+  async listSessions(opts: { withSummary?: boolean } = {}): Promise<Session[]> {
     this.calls += 1;
+    if (opts.withSummary) this.callsWithSummary += 1;
     return this.sessions;
   }
 
@@ -77,6 +79,41 @@ describe("AdapterRegistry caching", () => {
     await reg.listAllSessions();
 
     expect(stub.calls).toBe(2);
+  });
+
+  test("slim and full listings cache separately", async () => {
+    const stub = new CountingAdapter([makeSession("a")]);
+    const reg = new AdapterRegistry({ ttlMs: 60_000 });
+    reg.register(stub);
+
+    await reg.listAllSessions("cached", { withSummary: false });
+    await reg.listAllSessions("cached", { withSummary: false });
+    expect(stub.calls).toBe(1);
+
+    // Different bucket — should fetch fresh, not reuse the slim cache.
+    await reg.listAllSessions("cached", { withSummary: true });
+    expect(stub.calls).toBe(2);
+    expect(stub.callsWithSummary).toBe(1);
+
+    // Subsequent slim and full calls each reuse their own bucket.
+    await reg.listAllSessions("cached", { withSummary: false });
+    await reg.listAllSessions("cached", { withSummary: true });
+    expect(stub.calls).toBe(2);
+  });
+
+  test("invalidate() clears both slim and full buckets", async () => {
+    const stub = new CountingAdapter([makeSession("a")]);
+    const reg = new AdapterRegistry({ ttlMs: 60_000 });
+    reg.register(stub);
+
+    await reg.listAllSessions("cached", { withSummary: false });
+    await reg.listAllSessions("cached", { withSummary: true });
+    expect(stub.calls).toBe(2);
+
+    reg.invalidate();
+    await reg.listAllSessions("cached", { withSummary: false });
+    await reg.listAllSessions("cached", { withSummary: true });
+    expect(stub.calls).toBe(4);
   });
 
   test("expired cache entry triggers refetch", async () => {

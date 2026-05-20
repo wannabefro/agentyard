@@ -2,6 +2,7 @@ import type {
   Adapter,
   CreateSessionOpts,
   IdleWaitOptions,
+  ListSessionsOptions,
   OutputSnapshot,
   ReadyWaitOptions,
   ReadyWaitResult,
@@ -173,7 +174,8 @@ function showToSession(show: AoeSessionShow, base: Session | null): Session {
 export class AoeAdapter implements Adapter {
   readonly name = ADAPTER_NAME;
 
-  async listSessions(): Promise<Session[]> {
+  async listSessions(opts: ListSessionsOptions = {}): Promise<Session[]> {
+    const wantSummary = opts.withSummary === true;
     const entries = await runJson(aoeListSchema, ["list", "--json"]);
     const enriched = await Promise.all(
       entries.map(async (e) => {
@@ -184,7 +186,10 @@ export class AoeAdapter implements Adapter {
             e.id,
             "--json",
           ]).catch(() => null),
-          summaryFor(e.id),
+          // Skip the expensive per-session aoe capture unless requested.
+          // For N sessions the unfiltered path fires N captures even when
+          // the caller only wants list_sessions to enumerate ids/titles.
+          wantSummary ? summaryFor(e.id) : Promise.resolve(null),
         ]);
         return entryToSession(e, show?.status ?? "unknown", summary);
       }),
