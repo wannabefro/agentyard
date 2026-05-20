@@ -8,13 +8,14 @@ import { ClaudeCodeAdapter } from "@/adapters/claude-code/index.ts";
 import { sendThenWait } from "@/core/loop.ts";
 import { AdapterRegistry } from "@/core/registry.ts";
 import { resolve } from "@/resolver/index.ts";
+import pkg from "../package.json" with { type: "json" };
 
 const registry = new AdapterRegistry();
 registry.register(new AoeAdapter());
 registry.register(new ClaudeCodeAdapter());
 
 const server = new McpServer(
-  { name: "agentyard", version: "0.1.0" },
+  { name: "agentyard", version: pkg.version },
   {
     instructions:
       "agentyard orchestrates AI coding agent sessions across adapters. " +
