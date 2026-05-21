@@ -113,6 +113,10 @@ server.registerTool(
   "list_sessions",
   {
     title: "List sessions",
+    // annotations.readOnlyHint=true is required by Codex 0.132 in `codex exec`
+    // mode — any MCP tool without this annotation is silently cancelled with
+    // "user cancelled MCP tool call". See docs/integrations/codex-host.md.
+    annotations: { readOnlyHint: true },
     description:
       "List every known agent session across all registered adapters. " +
       "Returns a slim shape by default — per-session `summary` and `raw` " +
@@ -190,6 +194,7 @@ server.registerTool(
   "resolve_session",
   {
     title: "Resolve session",
+    annotations: { readOnlyHint: true },
     description:
       "Map a natural-language reference (e.g. 'the fender evals one', 'the running codex session') " +
       "to ranked session candidates with reasons. Returns the top N matches.",
@@ -224,6 +229,10 @@ server.registerTool(
   "switch_session",
   {
     title: "Switch to a session by natural-language query",
+    // Mutates persistent selection state — not destructive (reversible).
+    // Codex exec auto-cancels non-readOnly tools; this is callable from the
+    // Codex TUI via interactive approval.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     description:
       "One-call resolve + pin: takes a free-text query, picks the top resolver candidate, " +
       "and sets it as the current selection (persisted via ~/.agentyard/state.json). " +
@@ -299,6 +308,12 @@ server.registerTool(
   "select_session",
   {
     title: "Select (or read/clear) current session",
+    // Dual-purpose: read-only when no args, mutating when adapter/id or
+    // clear is set. Annotated as non-readOnly because the mutating shape is
+    // the more useful surface — read-only callers can use list_sessions or
+    // pass no args and inspect the response (which works fine but is
+    // gated by the same approval as the write path under Codex exec).
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     description:
       "Pin a session as the current selection for subsequent tool calls. " +
       "Tools that target a session (get_session, get_output, send_input, " +
@@ -367,6 +382,7 @@ server.registerTool(
   "get_session",
   {
     title: "Get session",
+    annotations: { readOnlyHint: true },
     description:
       "Fetch full detail for one session, including live status. " +
       "When both adapter and id are omitted, falls back to the current selection (see select_session).",
@@ -388,6 +404,7 @@ server.registerTool(
   "get_output",
   {
     title: "Get session output",
+    annotations: { readOnlyHint: true },
     description:
       "Read the last N lines of a session's output. Always returns flat `content` (string) and `lines` (number). Conversation-shaped adapters (e.g. claude-code) also return `structured`: an array of {role, text, timestamp?, kind?} messages so hosts can render or filter typed messages without re-parsing the flat text. " +
       "adapter/id are optional; when omitted, the current selection is used (see select_session).",
@@ -409,6 +426,10 @@ server.registerTool(
   "send_input",
   {
     title: "Send input to session",
+    // Sends to a running agent — not destructive per se, but the agent
+    // can do anything in response. Codex exec auto-cancels; Codex TUI
+    // approves interactively.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description:
       "Fire-and-forget send: transmits text to the underlying tmux pane. " +
       "Returns ok:true if the CLI accepted the send — NOT a guarantee the " +
@@ -441,6 +462,7 @@ server.registerTool(
   "send_then_wait",
   {
     title: "Send input and wait for the agent to settle",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description:
       "Send a message to a session and block until the agent has processed it: " +
       "(1) snapshot the pane, (2) send the text, (3) wait for the pane to change " +
@@ -486,6 +508,7 @@ server.registerTool(
   "chat",
   {
     title: "Chat: send a message to the selected session (shorthand)",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description:
       "Minimal shorthand for send_then_wait against the current selection. " +
       "Requires that a session is already selected (via select_session or switch_session). " +
@@ -536,6 +559,7 @@ server.registerTool(
   "wait_idle",
   {
     title: "Wait for session to settle",
+    annotations: { readOnlyHint: true },
     description:
       "Poll the session's pane until output has been unchanged for `idleWindowMs`, or until `timeoutMs` elapses.",
     inputSchema: {
@@ -564,6 +588,7 @@ server.registerTool(
   "wait_for_ready",
   {
     title: "Wait for agent prompt cursor",
+    annotations: { readOnlyHint: true },
     description:
       "Poll the session's pane until the last non-empty line ends with a known prompt cursor, " +
       "or until timeoutMs elapses. Use this before send_input when a session has just been started " +
@@ -597,6 +622,7 @@ server.registerTool(
   "create_session",
   {
     title: "Create session",
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     description: "Create a new agent session via the adapter (e.g. `aoe add`). Returns the new session id and title.",
     inputSchema: {
       adapter: z.string().describe("Adapter name, e.g. 'aoe'"),
@@ -622,6 +648,7 @@ server.registerTool(
   "start_session",
   {
     title: "Start session",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     description: "Start a stopped agent session.",
     inputSchema: {
       adapter: z.string().optional(),
@@ -643,6 +670,7 @@ server.registerTool(
   "stop_session",
   {
     title: "Stop session",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     description: "Stop a running agent session.",
     inputSchema: {
       adapter: z.string().optional(),
@@ -664,6 +692,7 @@ server.registerTool(
   "restart_session",
   {
     title: "Restart session",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     description: "Restart a session (stop then start).",
     inputSchema: {
       adapter: z.string().optional(),
@@ -685,6 +714,9 @@ server.registerTool(
   "remove_session",
   {
     title: "Remove session",
+    // Genuinely destructive — deletes session record, and optionally
+    // worktree/branch. The host should require explicit user confirmation.
+    annotations: { readOnlyHint: false, destructiveHint: true },
     description:
       "Remove a session record and optionally its worktree/branch. " +
       "If the removed session is the current selection, the selection is auto-cleared.",
