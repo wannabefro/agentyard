@@ -269,14 +269,28 @@ expect(
 );
 
 // 10. chat() with selection set sends and returns the response.
-// The mock adapter doesn't implement sendThenWait, so it'll fail via the
-// loop's "adapter does not support sendThenWait (read-only)" path. We
-// still expect a structured ok=false response (not a crash) — verifies
-// chat threads errors through cleanly.
+// The previous switch_session call picked the aoe fender-evals session
+// (highest resolver score); that session isn't actually running, so the
+// chat fails via aoe's waitForReady ("agent not ready: prompt cursor
+// not detected"). We still expect a structured ok=false response (not
+// a crash) — verifies chat threads errors through cleanly.
 const chatResult = await callTool("chat", { text: "hello" });
 expect(
   chatResult.ok === false && typeof chatResult.error === "string",
   `chat(): ok=${chatResult.ok} error="${chatResult.error}"`,
+);
+
+// 10a. Failed chat response carries the diagnostic fields a host LLM
+// needs to recover: which session we targeted, plus an actionable hint
+// mapped from the failure reason. Regression guard for the "agent gives
+// up after a single error" UX problem.
+expect(
+  typeof chatResult.adapter === "string" && typeof chatResult.id === "string",
+  `chat() failure -> includes adapter/id: adapter=${chatResult.adapter} id=${chatResult.id}`,
+);
+expect(
+  typeof chatResult.hint === "string" && chatResult.hint.length > 0,
+  `chat() failure -> hint suggests next action: ${chatResult.hint}`,
 );
 
 // 11. chat() with no selection returns the "no session selected" error.
@@ -285,6 +299,10 @@ const chatNoSel = await callTool("chat", { text: "hello" });
 expect(
   chatNoSel.ok === false && chatNoSel.error?.includes("no session selected"),
   `chat() without selection -> error: ${chatNoSel.error}`,
+);
+expect(
+  typeof chatNoSel.hint === "string" && chatNoSel.hint.includes("select_session"),
+  `chat() no-selection -> hint points at switch_session/select_session: ${chatNoSel.hint}`,
 );
 
 proc.kill();

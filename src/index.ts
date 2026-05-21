@@ -179,6 +179,55 @@ function trailingSnippet(content: string): string {
   return lines.slice(-CHAT_FALLBACK_SNIPPET_LINES).join("\n");
 }
 
+// Last non-empty line of the captured pane. Useful in error responses so
+// the caller can see WHAT the session is showing (e.g. a selector menu,
+// a half-rendered prompt, a "Bash command needs approval" gate) instead
+// of guessing from the error string alone.
+function lastNonEmptyLine(content: string): string {
+  const lines = content.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const l = lines[i]!.trimEnd();
+    if (l.trim().length > 0) return l;
+  }
+  return "";
+}
+
+// Map known send_then_wait failure reasons to a one-line, actionable
+// next-step suggestion. Keeps the LLM caller from giving up when the
+// failure is recoverable (busy session → wait_idle; wrong session →
+// list_sessions). Returns undefined when the reason doesn't match a
+// known pattern — callers should omit the field rather than emit a
+// generic platitude.
+function hintForChatFailure(reason: string | undefined): string | undefined {
+  if (!reason) return undefined;
+  const r = reason.toLowerCase();
+  if (r.includes("no session selected")) {
+    return "call switch_session or select_session to pin a target first";
+  }
+  if (r.includes("agent not ready") || r.includes("prompt cursor")) {
+    return "session's terminal isn't at a prompt — call get_output to see current state, wait_idle if the agent is still working, or list_sessions to pick a different target";
+  }
+  if (r.includes("did not appear in pane") || r.includes("no pane change")) {
+    return "agent didn't process the input — call get_output to inspect, or restart_session if it's stuck";
+  }
+  if (r.includes("did not settle")) {
+    return "agent is still working — call wait_idle to keep polling, or get_output to see partial progress";
+  }
+  if (r.includes("send failed")) {
+    return "the underlying CLI rejected the send — call get_session to check status";
+  }
+  if (r.includes("another adapter") || r.includes("ownership")) {
+    return "another adapter has this session live — drive the session through that adapter, or stop the conflicting attach first";
+  }
+  if (r.includes("does not support sendthenwait") || r.includes("read-only")) {
+    return "this session's adapter is read-only — pick a session whose adapter implements send (aoe, claude-code, codex)";
+  }
+  if (r.includes("session not found") || r.includes("no longer exists")) {
+    return "session was removed — call list_sessions and pick a new one";
+  }
+  return undefined;
+}
+
 function slimSession(
   s: Session,
   opts: { withSummary: boolean; withRaw: boolean },
@@ -483,7 +532,13 @@ server.registerTool(
   },
   async ({ adapter, id, text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, pollIntervalMs, readyTimeoutMs }) => {
     const t = await resolveTarget({ adapter, id });
-    if (!t.ok) return asJsonText({ error: t.reason });
+    if (!t.ok) {
+      return asJsonText({
+        ok: false,
+        error: t.reason,
+        hint: hintForChatFailure(t.reason),
+      });
+    }
     const result = await sendThenWait(
       registry.get(t.adapter),
       t.id,
@@ -500,7 +555,20 @@ server.registerTool(
       // live attach to the same underlying agent session.
       registry,
     );
-    return asJsonText(result);
+    // Mirror chat()'s affordances: attach adapter/id and (on failure) a
+    // hint so callers don't need to inspect before/after to know what to
+    // try next. Full before/after still travel through unchanged for
+    // callers that want them.
+    const enriched: Record<string, unknown> = {
+      ...result,
+      adapter: t.adapter,
+      id: t.id,
+    };
+    if (!result.ok) {
+      const h = hintForChatFailure(result.reason);
+      if (h) enriched.hint = h;
+    }
+    return asJsonText(enriched);
   },
 );
 
@@ -512,9 +580,11 @@ server.registerTool(
     description:
       "Minimal shorthand for send_then_wait against the current selection. " +
       "Requires that a session is already selected (via select_session or switch_session). " +
-      "Returns just {ok, response, elapsedMs, warnings?} instead of full before/after " +
-      "snapshots — meant to keep host context small in multi-turn loops. " +
-      "For diagnostic detail (cwd warnings, ownership conflicts, ANSI), use send_then_wait.",
+      "On success returns {ok, adapter, id, response, elapsedMs, warnings?}. " +
+      "On failure returns {ok:false, adapter?, id?, error, lastLine?, hint?, elapsedMs?, warnings?} — " +
+      "lastLine is the last non-empty line of the session's pane (so the caller can see " +
+      "WHAT is on screen), and hint is a one-line suggestion for the next tool to call. " +
+      "For full before/after snapshots and ANSI use send_then_wait.",
     inputSchema: {
       text: z.string().min(1).describe("Message to send to the selected session"),
       changeTimeoutMs: z.number().int().min(500).max(120_000).default(15_000),
@@ -525,7 +595,13 @@ server.registerTool(
   },
   async ({ text, changeTimeoutMs, idleTimeoutMs, idleWindowMs, readyTimeoutMs }) => {
     const t = await resolveTarget({});
-    if (!t.ok) return asJsonText({ ok: false, error: t.reason });
+    if (!t.ok) {
+      return asJsonText({
+        ok: false,
+        error: t.reason,
+        hint: hintForChatFailure(t.reason),
+      });
+    }
     const result = await sendThenWait(
       registry.get(t.adapter),
       t.id,
@@ -534,9 +610,19 @@ server.registerTool(
       registry,
     );
     if (!result.ok) {
+      // Surface adapter/id (which session we tried), the last visible line
+      // on its pane (what state it's actually in), and a hint mapping the
+      // failure reason to the next tool the caller should reach for. The
+      // last line is the highest-signal single fact: it shows selector
+      // menus, half-rendered prompts, "Bash needs approval" gates, etc.
+      const lastLine = lastNonEmptyLine(result.after.content);
       return asJsonText({
         ok: false,
+        adapter: t.adapter,
+        id: t.id,
         error: result.reason,
+        lastLine: lastLine || undefined,
+        hint: hintForChatFailure(result.reason),
         elapsedMs: result.elapsedMs,
         warnings: result.warnings,
       });
@@ -548,6 +634,8 @@ server.registerTool(
     const response = lastAssistantText(result.after) ?? trailingSnippet(result.after.content);
     return asJsonText({
       ok: true,
+      adapter: t.adapter,
+      id: t.id,
       response,
       elapsedMs: result.elapsedMs,
       warnings: result.warnings,
