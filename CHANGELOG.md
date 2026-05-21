@@ -10,6 +10,44 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-21
+
+### Added
+
+- **Codex CLI host support.** Every registered tool now carries
+  `annotations` (readOnlyHint plus accurate destructive/idempotent/
+  openWorld hints). Codex 0.132 in non-interactive `codex exec` mode
+  silently cancels MCP tool calls whose tools aren't annotated
+  `readOnlyHint: true` — without this fix every agentyard call from
+  Codex returned "user cancelled MCP tool call" before `tools/call` was
+  even sent. After: read tools (`list_sessions`, `resolve_session`,
+  `get_session`, `get_output`, `wait_idle`, `wait_for_ready`) work in
+  `codex exec`; write tools surface honest approval prompts in the
+  Codex TUI.
+
+- **`docs/integrations/codex-host.md`** — registration recipe for
+  Codex (`codex mcp add ...`), what works, what doesn't, and the full
+  diagnosis trail behind the `readOnlyHint` quirk so the next person
+  doesn't relive the bisection.
+
+- **Enriched `chat` and `send_then_wait` failure responses.** Failures
+  now also include `adapter`, `id`, `lastLine` (last non-empty pane
+  line — reveals selector menus, approval gates, partial prompts), and
+  `hint` (one-line next-step suggestion mapped from the failure reason
+  — busy session → wait_idle, no selection → switch_session, ownership
+  conflict → switch adapters, etc.). `chat` success now also returns
+  `{adapter, id}` so multi-turn loops can correlate replies with
+  sessions without a separate `select_session` read.
+
+### Tests
+
+- New `tests/live_dogfood_codex_host.ts` regression check spawns the
+  MCP server stdio-style and asserts every tool declares
+  `annotations.readOnlyHint`. Fails fast if a future tool registration
+  drops the annotation.
+- `tests/mcp_smoke.ts` grows assertions on the new `adapter`/`id`/
+  `hint` fields in chat failure responses.
+
 ## [0.3.0] - 2026-05-20
 
 ### Added
