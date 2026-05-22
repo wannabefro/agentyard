@@ -10,6 +10,22 @@ or exact version if you depend on this externally.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-22
+
+### Documentation
+
+- README refreshed to reflect v0.4.0 reality: codex adapter and Codex
+  CLI host (TUI + exec) added to the supported lists; the conversational
+  shorthand tools (`switch_session`, `select_session`, `chat`) and the
+  persistent `~/.agentyard/state.json` pointer they share are
+  documented; the enriched `chat` / `send_then_wait` failure shape
+  (`adapter`, `id`, `lastLine`, `hint`) is called out; quick-start
+  examples use the shorthand; project layout reflects the current tree
+  (codex adapter, mock, `core/{selection,ownership,spawn_env,loop}`).
+  Version-pin example bumped 0.1.3 → 0.4.0.
+
+No code changes.
+
 ## [0.4.0] - 2026-05-21
 
 ### Added
