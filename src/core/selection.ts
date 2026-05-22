@@ -5,12 +5,21 @@ import { dirname, join } from "node:path";
 export type Selection = {
   adapter: string;
   id: string;
+  // Human-readable session label, captured at pin time. Routing identity
+  // is (adapter, id); title is for user-visible surfaces — the in-band
+  // routing header that send-style tools instruct the host to echo, and
+  // the out-of-band status-line readers (see docs/integrations/status-line.md).
+  // Never used for routing, so staleness from an out-of-band rename is
+  // tolerable; resolveTarget refreshes against the live session when it
+  // can.
+  title?: string;
 };
 
-// Persistent "current session pointer" for the MCP server. Backed by a
-// single JSON file so the selection survives /mcp reconnects and host
-// restarts. In-memory cache is the source of truth during a process
-// lifetime; load() lazily warms the cache from disk on first read.
+// Persistent state for the MCP server: a routing pointer (adapter, id)
+// plus an optional UX label (title). Backed by a single JSON file so the
+// selection survives /mcp reconnects and host restarts. The file is also
+// the contract with external readers — status-line integrations parse it
+// directly. Keep additions backwards-compatible.
 //
 // Atomic writes via tmp + rename so a crashed write can't truncate the
 // state file to garbage. Concurrency is not a concern — the MCP server is
@@ -46,7 +55,10 @@ export class SelectionStore {
       const parsed = JSON.parse(text) as StateFile;
       const sel = parsed?.selected;
       if (sel && typeof sel.adapter === "string" && typeof sel.id === "string") {
-        return { adapter: sel.adapter, id: sel.id };
+        const title = typeof sel.title === "string" && sel.title.length > 0
+          ? sel.title
+          : undefined;
+        return { adapter: sel.adapter, id: sel.id, title };
       }
       return null;
     } catch {
@@ -60,7 +72,14 @@ export class SelectionStore {
     if (!selection.adapter || !selection.id) {
       throw new Error("Selection requires both adapter and id");
     }
-    await this.persist({ adapter: selection.adapter, id: selection.id });
+    // Empty-string title is normalized to undefined so callers passing an
+    // unset adapter title don't end up persisting `"title": ""`. Beyond
+    // that, undefined-valued keys are dropped by JSON.stringify on the
+    // wire, so we don't bother stripping the in-memory object.
+    const title = selection.title && selection.title.length > 0
+      ? selection.title
+      : undefined;
+    await this.persist({ adapter: selection.adapter, id: selection.id, title });
   }
 
   async clear(): Promise<void> {

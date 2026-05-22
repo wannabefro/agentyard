@@ -97,4 +97,42 @@ describe("SelectionStore", () => {
     const store = new SelectionStore(path);
     expect(store.path).toBe(path);
   });
+
+  test("set/get round-trips an optional title when provided", async () => {
+    // Invariant: title is a cosmetic label persisted at the moment of
+    // selection so status-line surfaces (~/.agentyard/state.json readers)
+    // can show "fender-evals" instead of an opaque session id. Title must
+    // survive a fresh store load.
+    const store = new SelectionStore(path);
+    await store.set({ adapter: "aoe", id: "abc123", title: "fender-evals" });
+    expect(await store.get()).toEqual({
+      adapter: "aoe",
+      id: "abc123",
+      title: "fender-evals",
+    });
+    const reopened = new SelectionStore(path);
+    expect(await reopened.get()).toEqual({
+      adapter: "aoe",
+      id: "abc123",
+      title: "fender-evals",
+    });
+  });
+
+  test("set() does not persist an empty/missing title on the wire", async () => {
+    // Invariant: when no title is supplied (or an empty string is passed),
+    // the on-disk JSON does not include a `title` key. This is what
+    // external status-line readers see and is the only externally
+    // observable surface — the in-memory Selection's `title` field can be
+    // `undefined` either way (toEqual/JSON.stringify both collapse those
+    // back to "no key").
+    const store = new SelectionStore(path);
+    await store.set({ adapter: "aoe", id: "abc123" });
+    expect(await store.get()).toEqual({ adapter: "aoe", id: "abc123" });
+    let data = JSON.parse(readFileSync(path, "utf8"));
+    expect(data.selected).not.toHaveProperty("title");
+
+    await store.set({ adapter: "aoe", id: "abc123", title: "" });
+    data = JSON.parse(readFileSync(path, "utf8"));
+    expect(data.selected).not.toHaveProperty("title");
+  });
 });
